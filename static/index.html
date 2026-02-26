@@ -1,0 +1,3684 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Point Cloud Annotation Tool</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: sans-serif;
+            background-color: #000;
+            color: #eee;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+
+        #sidebar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 300px;
+            height: 100%;
+            background: rgba(30, 30, 30, 0.95);
+            border-right: 1px solid #444;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            font-size: 14px;
+            z-index: 20;
+            /* Ensure it is above the interaction overlay */
+        }
+
+        .control-group {
+            margin-bottom: 15px;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 6px;
+            margin-bottom: 5px;
+            background: #222;
+            color: white;
+            border: 1px solid #444;
+            box-sizing: border-box;
+        }
+
+        button {
+            width: 100%;
+            padding: 8px;
+            cursor: pointer;
+            background: #3a3a3a;
+            color: white;
+            border: 1px solid #555;
+            margin-bottom: 5px;
+            border-radius: 3px;
+        }
+
+        button:hover {
+            background: #4a4a4a;
+        }
+
+        button.active {
+            background: #3b82f6;
+            border-color: #2563eb;
+        }
+
+        /* Slider styling */
+        input[type="range"] {
+            width: 100%;
+            margin: 5px 0;
+        }
+
+        #file-list {
+            flex-grow: 1;
+            overflow-y: auto;
+            border: 1px solid #444;
+            margin-top: 5px;
+            background: #111;
+            max-height: 200px;
+        }
+
+        #object-list {
+            flex-grow: 1;
+            overflow-y: auto;
+            border: 1px solid #444;
+            margin-top: 5px;
+            background: #111;
+            max-height: 200px;
+        }
+
+        .file-item,
+        .obj-item {
+            padding: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            border-bottom: 1px solid #222;
+        }
+
+        .file-item:hover,
+        .obj-item:hover {
+            background: #333;
+        }
+
+        .file-item.selected,
+        .obj-item.selected {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .info-text {
+            font-size: 0.75em;
+            color: #888;
+            margin-top: 10px;
+            line-height: 1.4;
+        }
+
+        #controls-overlay {
+            position: absolute;
+            top: 10px;
+            left: 320px;
+            /* Sidebar width + gap */
+            background: rgba(0, 0, 0, 0.6);
+            padding: 8px 12px;
+            border-radius: 4px;
+            pointer-events: none;
+            font-family: monospace;
+            font-size: 12px;
+            color: #0f0;
+        }
+
+        .prop-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+
+        .prop-row input {
+            width: 70px;
+            margin-bottom: 0;
+        }
+    </style>
+    <!-- Import Maps Polyfill -->
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+
+<body>
+
+    <div id="sidebar">
+        <h3 style="margin-top:0; color: #fff;">Lidar Annotator</h3>
+
+        <div class="control-group">
+            <label data-i18n="dataDir">数据目录:</label>
+            <input type="text" id="dir-path" value="/home/zero/DATA/temp/1211/dataset_bin_output/">
+            <button id="btn-load-dir" data-i18n="loadDir">加载目录</button>
+        </div>
+
+        <div class="control-group">
+            <label data-i18n="fileList">文件列表:</label>
+            <div id="file-list"></div>
+        </div>
+
+        <div class="control-group">
+            <label data-i18n="objects">标注对象:</label>
+            <div id="object-list"></div>
+        </div>
+
+        <!-- 4. Selection Info -->
+        <div id="selection-info"
+            style="display:none; background: #2a2a2a; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+            <h4 style="margin: 0 0 10px 0;" data-i18n="selTitle">当前选中</h4>
+            <div class="prop-row"><span data-i18n="selType">类型:</span> <span id="sel-type" style="color: #aaa;">-</span>
+            </div>
+            <div class="prop-row"><span>ID:</span> <input type="number" id="sel-id" style="width: 70px;"></div>
+            <div class="prop-row" id="row-ref-id" style="display:none;"><span data-i18n="selRefId">关联ID:</span> <input
+                    type="number" id="sel-ref-id" style="width: 70px;"></div>
+            <div class="prop-row">
+                <span data-i18n="selClass">类别:</span>
+                <select id="sel-class" style="width: 100px; background: #222; color: white; border: 1px solid #444;">
+                    <!-- Populated by JS -->
+                </select>
+            </div>
+        </div>
+
+        <!-- 5. Creation Tools -->
+        <div class="control-group">
+            <button id="btn-add-box" data-i18n="addBox">添加框 (W)</button>
+            <button id="btn-add-point" data-i18n="addPoint">添加点 (S)</button>
+            <button id="btn-add-group" data-i18n="addGroup">添加点集 (E)</button>
+            <button id="btn-delete" data-i18n="deleteObj">删除选中 (Del)</button>
+        </div>
+
+        <!-- Smart Assist (Moved Up) -->
+        <div class="control-group">
+            <label data-i18n="smartAssist">智能辅助:</label>
+            <button id="btn-auto-fit" data-i18n="autoFit">自动适配尺寸 (K)</button>
+            <button id="btn-snap-ground" data-i18n="snapGround">地面贴合 (G)</button>
+        </div>
+
+        <!-- 6. Save Controls -->
+        <div class="control-group">
+            <div class="prop-row" style="justify-content: flex-start; gap: 10px;">
+                <input type="checkbox" id="chk-autosave" checked style="width: auto; margin: 0;">
+                <span data-i18n="autoSave">自动保存更改</span>
+            </div>
+            <button id="btn-save" style="margin-bottom: 5px;" data-i18n="save">保存标注 (Ctrl+S)</button>
+
+            <div class="prop-row" style="justify-content: flex-start; gap: 10px; margin-top: 5px;">
+                <input type="checkbox" id="chk-export-kitti-kps" checked style="width: auto; margin: 0;">
+                <span style="font-size: 0.9em;" data-i18n="kittiKps">KITTI 包含关键点</span>
+            </div>
+
+            <div class="prop-row" style="margin-top: 5px;">
+                <select id="sel-export-fmt" style="width: 60%; background: #222; color: white; border: 1px solid #444;">
+                    <option value="json" data-i18n-opt="fmtJson">JSON (默认)</option>
+                    <option value="kitti" data-i18n-opt="fmtKitti">KITTI (.txt)</option>
+                    <option value="nuscenes" data-i18n-opt="fmtNuscenes">nuScenes (预留)</option>
+                </select>
+                <button id="btn-export" style="width: 35%; padding: 4px;" data-i18n="exportBtn">导出</button>
+            </div>
+            <div class="prop-row" style="margin-top: 5px;">
+                <button id="btn-propagate" style="width: 100%; background: #4b5563;" data-i18n="propagate">>>>
+                    传播到下一帧</button>
+            </div>
+        </div>
+
+        <!-- 7. Class Management & Defaults -->
+        <div class="control-group">
+            <label data-i18n="classConfig">类别管理 & 默认配置:</label>
+
+            <!-- Mode Indicator -->
+            <div style="margin-bottom: 5px; font-size: 0.9em; color: #aaa;">
+                <span data-i18n="currentMode">当前模式:</span> <span id="ui-mode-label"
+                    style="color: #fff; font-weight: bold;">-</span>
+            </div>
+
+            <div class="prop-row">
+                <!-- Two separate dropdowns. Visibility toggled by JS -->
+                <select id="cfg-class-box"
+                    style="width: 78%; background: #222; color: white; border: 1px solid #444; display:none;">
+                    <!-- Box Classes -->
+                </select>
+                <select id="cfg-class-point"
+                    style="width: 78%; background: #222; color: white; border: 1px solid #444; display:none;">
+                    <!-- Point Classes -->
+                </select>
+
+                <button id="btn-del-class"
+                    style="width: 20%; padding: 4px; background: #7f1d1d; color: #fecaca; border: 1px solid #991b1b;"
+                    title="删除当前类别" data-i18n-title="delClassTitle">X</button>
+            </div>
+
+            <!-- Add Class Section -->
+            <div class="prop-row" style="margin-top:5px; border-top: 1px dashed #444; padding-top: 5px;">
+                <input type="text" id="new-class-name" placeholder="新类别名" data-i18n-ph="newClassPlaceholder"
+                    style="width: 45%;">
+                <select id="new-class-type" style="width: 30%; background: #222; color: white; border: 1px solid #444;">
+                    <option value="box">Box</option>
+                    <option value="point">Point</option>
+                </select>
+                <button id="btn-add-class" style="width: 20%; padding: 6px;">+</button>
+            </div>
+
+            <!-- Box Settings Panel -->
+            <div id="cfg-box-settings"
+                style="background: #222; padding: 5px; margin-top: 5px; border-radius: 3px; display:none;">
+                <div class="prop-row">
+                    <span data-i18n="dimL">长 (L):</span> <input type="number" id="def-l" value="4.5" step="0.1"
+                        style="width: 60px;">
+                </div>
+                <div class="prop-row">
+                    <span data-i18n="dimW">宽 (W):</span> <input type="number" id="def-w" value="1.8" step="0.1"
+                        style="width: 60px;">
+                </div>
+                <div class="prop-row">
+                    <span data-i18n="dimH">高 (H):</span> <input type="number" id="def-h" value="1.5" step="0.1"
+                        style="width: 60px;">
+                </div>
+                <div class="prop-row">
+                    <span data-i18n="subPointSize">点大小 (r):</span> <input type="number" id="def-sub-point-size"
+                        value="0.1" step="0.05" style="width: 60px;">
+                </div>
+                <label style="margin-top:5px; font-size:0.9em; display:block;" data-i18n="subPattern">关联点集 (相对坐标 x y
+                    z):</label>
+                <textarea id="def-sub-pattern" rows="3"
+                    style="width:100%; background:#111; color:#0f0; border:1px solid #444; font-family:monospace; font-size:12px; white-space:pre;"
+                    placeholder="0 0 0.5"></textarea>
+            </div>
+
+            <!-- Point Settings Panel -->
+            <div id="cfg-point-settings"
+                style="background: #222; padding: 5px; margin-top: 5px; border-radius: 3px; display:none;">
+                <div class="prop-row">
+                    <span data-i18n="pointRadius">点半径 (m):</span> <input type="number" id="def-radius" value="0.1"
+                        step="0.05" style="width: 60px;">
+                </div>
+                <label style="margin-top:5px; font-size:0.9em;" data-i18n="pointPattern">相对位置 (x y z, 每行一个):</label>
+                <textarea id="def-pattern" rows="4"
+                    style="width:100%; background:#111; color:#0f0; border:1px solid #444; font-family:monospace; font-size:12px; white-space:pre;">0 0 0</textarea>
+            </div>
+
+            <div class="prop-row" style="margin-top: 10px;">
+                <button id="btn-export-cfg" style="width: 48%;" data-i18n="exportCfg">导出配置</button>
+                <button id="btn-import-cfg" style="width: 48%;" data-i18n="importCfg">导入配置</button>
+                <input type="file" id="file-import-cfg" style="display:none;" accept=".json">
+            </div>
+
+            <div class="prop-row"
+                style="justify-content: flex-start; gap: 10px; margin-top: 10px; border-top: 1px solid #444; padding-top: 5px;">
+                <input type="checkbox" id="chk-lock-z" checked style="width: auto; margin: 0;">
+                <span data-i18n="lockZ">锁定 Z 轴旋转</span>
+            </div>
+            <div class="prop-row">
+                <span data-i18n="fitPadding">适配边距 (m):</span>
+                <input type="number" id="cfg-padding" value="0.1" step="0.05" style="width: 70px;">
+            </div>
+        </div>
+
+        <!-- Visualization (Moved Down) -->
+        <div class="control-group">
+            <label data-i18n="vizSettings">可视化设置:</label>
+            <div class="prop-row">
+                <span data-i18n="colorMode">着色模式:</span>
+                <select id="sel-color-mode"
+                    style="width: 100px; background: #222; color: white; border: 1px solid #444;">
+                    <option value="mixed" data-i18n-opt="colorMixed">混合 (Mixed)</option>
+                    <option value="height" data-i18n-opt="colorHeight">高度 (Height)</option>
+                    <option value="intensity" data-i18n-opt="colorIntensity">强度 (Intensity)</option>
+                </select>
+            </div>
+            <div class="prop-row">
+                <span><span data-i18n="groundFilter">地面过滤 (Z):</span> <span id="lbl-ground">-10.0</span></span>
+            </div>
+            <input type="range" id="rng-ground" min="-5" max="5" step="0.1" value="-5">
+
+            <div class="prop-row">
+                <span><span data-i18n="pointSizeLabel">点云大小:</span> <span id="lbl-point-size">2.0</span></span>
+            </div>
+            <input type="range" id="rng-point-size" min="1" max="10" step="0.5" value="2.0">
+
+            <div class="prop-row" style="justify-content: flex-start; gap: 10px;">
+                <input type="checkbox" id="chk-attenuation" style="width: auto; margin: 0;">
+                <span data-i18n="depthAtten">深度衰减</span>
+            </div>
+            <div class="prop-row" style="justify-content: flex-start; gap: 10px;">
+                <input type="checkbox" id="chk-ghosting" style="width: auto; margin: 0;">
+                <span data-i18n="ghosting">显示上一帧残影 (Ghost)</span>
+            </div>
+            <div class="prop-row" style="justify-content: flex-start; gap: 10px;">
+                <input type="checkbox" id="chk-round-points" style="width: auto; margin: 0;">
+                <span data-i18n="roundPoints">圆形点云 (Round Points)</span>
+            </div>
+            <div class="prop-row" style="justify-content: flex-start; gap: 10px;">
+                <input type="checkbox" id="chk-show-heading" checked style="width: auto; margin: 0;">
+                <span data-i18n="showHeading">显示朝向 (Heading)</span>
+            </div>
+            <div class="prop-row" style="justify-content: flex-start; gap: 10px;">
+                <input type="checkbox" id="chk-hover-highlight" checked style="width: auto; margin: 0;">
+                <span data-i18n="hoverHighlight">悬停高亮 (Hover)</span>
+            </div>
+        </div>
+
+        <div class="info-text">
+            <strong data-i18n="controlsTitle">操作说明:</strong>
+            <ul style="padding-left: 20px; margin: 5px 0;">
+                <li data-i18n="ctrlRotate">左键: 旋转 / 选中</li>
+                <li data-i18n="ctrlPan">右键: 平移</li>
+                <li data-i18n="ctrlEsc">Esc: 取消选中 (自由模式)</li>
+                <li data-i18n="ctrlWS">W: 添加框 | S: 添加点</li>
+                <li data-i18n="ctrlMode">1/2/3: 移动/旋转/缩放</li>
+                <li data-i18n="ctrlFocus">F: 聚焦 | M: 统计 | /: 帮助</li>
+                <li data-i18n="ctrlGK">G: 贴地 | K: 适配</li>
+                <li data-i18n="ctrlUndo">←/→: 撤销/重做</li>
+                <li data-i18n="ctrlNav">A/D: 上一帧/下一帧</li>
+                <li data-i18n="ctrlSave">Ctrl+S: 保存 | Ctrl+C/V: 复制粘贴</li>
+            </ul>
+        </div>
+
+        <div style="margin-top: 10px; border-top: 1px solid #444; padding-top: 8px;">
+            <button id="btn-lang-toggle"
+                style="width: 100%; padding: 6px; background: #2563eb; color: white; border: 1px solid #1d4ed8; border-radius: 3px; cursor: pointer; font-size: 13px;">English</button>
+        </div>
+    </div>
+
+    <div id="controls-overlay">
+        <div><span data-i18n="frameLabel">Frame:</span> <span id="frame-progress">- / -</span></div>
+        <div><span data-i18n="totalPoints">Total Points:</span> <span id="point-count">0</span></div>
+        <div id="box-points-row" style="display:none;"><span data-i18n="inBox">In Box:</span> <span
+                id="box-point-count">0</span></div>
+        <div id="status-msg" style="color: #ccc; font-style: italic;" data-i18n="ready">Ready</div>
+        <div id="dim-display" style="display:none; margin-top: 5px; color: #ffeb3b;"></div>
+    </div>
+
+    <div id="sidebar-right">
+        <div class="view-frame">
+            <div class="view-label" data-i18n="topView">俯视图 (Top)</div>
+        </div>
+        <div class="view-frame">
+            <div class="view-label" data-i18n="sideView">侧视图 (Side)</div>
+        </div>
+        <div class="view-frame" style="border-bottom: none;">
+            <div class="view-label" data-i18n="frontView">主视图 (Front)</div>
+        </div>
+    </div>
+
+    <!-- Interaction Overlay for Main View -->
+    <div id="main-view-overlay"></div>
+
+    <!-- Histogram Overlay -->
+    <div id="histogram-overlay"
+        style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background: linear-gradient(135deg, #1f2937 0%, #111827 100%); padding:25px; border-radius:12px; border:1px solid #374151; z-index:100; min-width:320px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+        <div
+            style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #374151; padding-bottom:12px; margin-bottom:15px;">
+            <h3 style="margin:0; color:#f3f4f6; font-size:18px;" data-i18n="histTitle">数据统计 (Histogram)</h3>
+            <button id="btn-close-hist"
+                style="background:transparent; border:none; color:#9ca3af; font-size:20px; cursor:pointer;">&times;</button>
+        </div>
+        <div id="histogram-content"></div>
+    </div>
+
+    <!-- Cheat Sheet Overlay -->
+    <div id="cheatsheet-overlay"
+        style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:200; align-items:center; justify-content:center;">
+        <div
+            style="background:#222; padding:30px; border-radius:10px; border:1px solid #666; max-width:600px; color:#eee;">
+            <h2 style="margin-top:0; border-bottom:1px solid #444; padding-bottom:10px;" data-i18n="cheatTitle">快捷键大全
+            </h2>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; font-family:monospace;">
+                <div data-i18n="csAddBox">W: 添加框</div>
+                <div data-i18n="csAddPoint">S: 添加点</div>
+                <div data-i18n="csTranslate">1: 移动模式</div>
+                <div data-i18n="csRotate">2: 旋转模式</div>
+                <div data-i18n="csScale">3: 缩放模式</div>
+                <div data-i18n="csFocus">F: 聚焦选中</div>
+                <div data-i18n="csGround">G: 地面贴合</div>
+                <div data-i18n="csAutoFit">K: 自动适配</div>
+                <div data-i18n="csStats">M: 统计信息</div>
+                <div data-i18n="csHelp">?: 显示此帮助</div>
+                <div data-i18n="csDel">Del: 删除选中</div>
+                <div data-i18n="csEsc">Esc: 取消选中</div>
+                <div data-i18n="csCopy">Ctrl+C: 复制</div>
+                <div data-i18n="csPaste">Ctrl+V: 粘贴</div>
+                <div data-i18n="csSave">Ctrl+S: 保存</div>
+                <div data-i18n="csNav">A/D: 切换帧</div>
+                <div data-i18n="csUndo">←/→: 撤销/重做</div>
+                <div data-i18n="csMouseL">Mouse Left: 旋转/选</div>
+                <div data-i18n="csMouseR">Mouse Right: 平移</div>
+                <div data-i18n="csScroll">Scroll: 缩放</div>
+            </div>
+            <div style="margin-top:20px; text-align:center; color:#888;" data-i18n="cheatClose">按任意键关闭</div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <style>
+        /* Update overlay CSS */
+        #controls-overlay {
+            position: absolute;
+            top: 10px;
+            left: 320px;
+            /* Offset for sidebar width */
+            background: rgba(0, 0, 0, 0.6);
+            padding: 8px 12px;
+            border-radius: 4px;
+            pointer-events: none;
+            font-family: monospace;
+            font-size: 14px;
+            color: #0f0;
+            z-index: 10;
+        }
+
+        #sidebar-right {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 500px;
+            height: 100%;
+            background: transparent;
+            /* Rendered by Canvas behind */
+            border-left: 4px solid #555;
+            /* Thicker main border */
+            pointer-events: none;
+            z-index: 5;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #main-view-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: calc(100% - 500px);
+            /* Main view width */
+            z-index: 6;
+            /* Above canvas, below controls-overlay */
+            /* background: rgba(255,0,0,0.2); Debug: see the area */
+        }
+
+        .view-frame {
+            width: 100%;
+            height: 33.33%;
+            position: relative;
+            box-sizing: border-box;
+            border-bottom: 4px solid #555;
+            /* Thicker separator */
+            /* Optional: Add background tint to separate from main view visually */
+            /* background: rgba(255,255,255,0.02); */
+        }
+
+        .view-label {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 14px;
+            color: #ddd;
+            pointer-events: none;
+            border: none;
+        }
+    </style>
+
+    <script type="module">
+        window.onerror = function (message, source, lineno, colno, error) {
+            alert("JS Error: " + message + "\nLine: " + lineno);
+        };
+
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
+        // =====================================================
+        // ===  国际化系统 (i18n)  ===
+        // =====================================================
+        const i18n = {
+            zh: {
+                // 侧边栏标题与目录
+                dataDir: '数据目录:', loadDir: '加载目录', fileList: '文件列表:', objects: '标注对象:',
+                // 选中信息
+                selTitle: '当前选中', selType: '类型:', selId: 'ID:', selRefId: '关联ID:', selClass: '类别:',
+                // 创建工具
+                addBox: '添加框 (W)', addPoint: '添加点 (S)', addGroup: '添加点集 (E)', deleteObj: '删除选中 (Del)',
+                // 智能辅助
+                smartAssist: '智能辅助:', autoFit: '自动适配尺寸 (K)', snapGround: '地面贴合 (G)',
+                // 保存与导出
+                autoSave: '自动保存更改', save: '保存标注 (Ctrl+S)', kittiKps: 'KITTI 包含关键点',
+                fmtJson: 'JSON (默认)', fmtKitti: 'KITTI (.txt)', fmtNuscenes: 'nuScenes (预留)',
+                exportBtn: '导出', propagate: '>>> 传播到下一帧',
+                // 类别管理
+                classConfig: '类别管理 & 默认配置:', currentMode: '当前模式:',
+                modeBox: 'Box (框)', modePoint: 'Point (点)',
+                delClassTitle: '删除当前类别', newClassPlaceholder: '新类别名',
+                dimL: '长 (L):', dimW: '宽 (W):', dimH: '高 (H):', subPointSize: '点大小 (r):',
+                subPattern: '关联点集 (相对坐标 x y z):', pointRadius: '点半径 (m):',
+                pointPattern: '相对位置 (x y z, 每行一个):',
+                exportCfg: '导出配置', importCfg: '导入配置',
+                lockZ: '锁定 Z 轴旋转', fitPadding: '适配边距 (m):',
+                // 可视化
+                vizSettings: '可视化设置:', colorMode: '着色模式:',
+                colorMixed: '混合 (Mixed)', colorHeight: '高度 (Height)', colorIntensity: '强度 (Intensity)',
+                groundFilter: '地面过滤 (Z):', pointSizeLabel: '点云大小:',
+                depthAtten: '深度衰减', ghosting: '显示上一帧残影 (Ghost)',
+                roundPoints: '圆形点云 (Round Points)', showHeading: '显示朝向 (Heading)',
+                hoverHighlight: '悬停高亮 (Hover)',
+                // 操作说明
+                controlsTitle: '操作说明:',
+                ctrlRotate: '左键: 旋转 / 选中', ctrlPan: '右键: 平移', ctrlEsc: 'Esc: 取消选中 (自由模式)',
+                ctrlWS: 'W: 添加框 | S: 添加点', ctrlMode: '1/2/3: 移动/旋转/缩放',
+                ctrlFocus: 'F: 聚焦 | M: 统计 | /: 帮助', ctrlGK: 'G: 贴地 | K: 适配',
+                ctrlUndo: '←/→: 撤销/重做', ctrlNav: 'A/D: 上一帧/下一帧',
+                ctrlSave: 'Ctrl+S: 保存 | Ctrl+C/V: 复制粘贴',
+                // 覆盖层
+                frameLabel: 'Frame:', totalPoints: 'Total Points:', inBox: 'In Box:', ready: 'Ready',
+                // 辅助视图
+                topView: '俯视图 (Top)', sideView: '侧视图 (Side)', frontView: '主视图 (Front)',
+                // 弹出面板
+                histTitle: '数据统计 (Histogram)', cheatTitle: '快捷键大全', cheatClose: '按任意键关闭',
+                // 快捷键大全
+                csAddBox: 'W: 添加框', csAddPoint: 'S: 添加点', csTranslate: '1: 移动模式', csRotate: '2: 旋转模式',
+                csScale: '3: 缩放模式', csFocus: 'F: 聚焦选中', csGround: 'G: 地面贴合', csAutoFit: 'K: 自动适配',
+                csStats: 'M: 统计信息', csHelp: '?: 显示此帮助', csDel: 'Del: 删除选中', csEsc: 'Esc: 取消选中',
+                csCopy: 'Ctrl+C: 复制', csPaste: 'Ctrl+V: 粘贴', csSave: 'Ctrl+S: 保存', csNav: 'A/D: 切换帧',
+                csUndo: '←/→: 撤销/重做', csMouseL: 'Mouse Left: 旋转/选', csMouseR: 'Mouse Right: 平移', csScroll: 'Scroll: 缩放',
+                // JS 动态文本
+                langToggle: 'English',
+                loading: '加载中...', loadDirBtn: '加载目录', noFiles: '未找到文件。', noObjects: '无对象。',
+                saving: '保存中...', saveBtn: '保存标注 (Ctrl+S)', saveFail: '保存失败!',
+                step1: 'Step 1: 发送请求...', step2: 'Step 2: 等待响应...', step3: 'Step 3: 收到响应',
+                step4: 'Step 4: 解析JSON...', step5: 'Step 5: 恢复数据...',
+                loadSuccess: '成功: 加载 {count} 个标注', noAnnotation: '未标注',
+                loadFail: '失败: HTTP {status}', loadError: '异常: {msg}',
+                firstFrame: '已经是第一帧', lastFrame: '已经是最后一帧',
+                noBoxClass: '未找到 Box 类型的类别。请先添加一个 Box 类别。',
+                noPointClass: '未找到 Point 类型的类别。请先添加一个 Point 类别。',
+                tooFewPoints: '点数过少，无法适配',
+                lastFrameOrNoFile: '已经是最后一帧或未加载文件',
+                nothingToPropagate: '当前帧无标注可传播',
+                propagated: '已传播 {count} 个框',
+                noHistData: '当前帧无标注数据',
+                batchConverting: '正在批量转换为 {fmt}...',
+                convertDone: '转换完成: {count} 个文件', convertFail: '转换失败: {msg}', convertError: '转换请求异常',
+                jsonAutoSaved: 'JSON 格式已自动保存。', noExportData: '无数据导出',
+                unsupportedFmt: '暂不支持该格式导出 (WIP)',
+                cannotDelClass: '无法删除: 请至少保留一个类别。',
+                confirmDelClass: '确定要永久删除类别 "{cls}" 吗？',
+                classExists: '类别名已存在', importSuccess: '配置导入成功', importFail: '导入失败: ',
+            },
+            en: {
+                dataDir: 'Data Directory:', loadDir: 'Load Directory', fileList: 'File List:', objects: 'Objects:',
+                selTitle: 'Selected', selType: 'Type:', selId: 'ID:', selRefId: 'Ref ID:', selClass: 'Class:',
+                addBox: 'Add Box (W)', addPoint: 'Add Point (S)', addGroup: 'Add Group (E)', deleteObj: 'Delete (Del)',
+                smartAssist: 'Smart Assist:', autoFit: 'Auto-Fit (K)', snapGround: 'Ground Snap (G)',
+                autoSave: 'Auto-Save Changes', save: 'Save (Ctrl+S)', kittiKps: 'KITTI w/ Keypoints',
+                fmtJson: 'JSON (Default)', fmtKitti: 'KITTI (.txt)', fmtNuscenes: 'nuScenes (Dummy)',
+                exportBtn: 'Export', propagate: '>>> Propagate',
+                classConfig: 'Class Config & Defaults:', currentMode: 'Mode:',
+                modeBox: 'Box', modePoint: 'Point',
+                delClassTitle: 'Delete current class', newClassPlaceholder: 'New class name',
+                dimL: 'L:', dimW: 'W:', dimH: 'H:', subPointSize: 'Point radius (r):',
+                subPattern: 'Sub-Points (relative x y z):', pointRadius: 'Radius (m):',
+                pointPattern: 'Position (x y z, per line):',
+                exportCfg: 'Export Config', importCfg: 'Import Config',
+                lockZ: 'Lock Z Rotation', fitPadding: 'Fit Padding (m):',
+                vizSettings: 'Visualization:', colorMode: 'Color Mode:',
+                colorMixed: 'Mixed', colorHeight: 'Height', colorIntensity: 'Intensity',
+                groundFilter: 'Ground Filter (Z):', pointSizeLabel: 'Point Size:',
+                depthAtten: 'Depth Attenuation', ghosting: 'Ghost (Prev Frame)',
+                roundPoints: 'Round Points', showHeading: 'Show Heading',
+                hoverHighlight: 'Hover Highlight',
+                controlsTitle: 'Controls:',
+                ctrlRotate: 'Left-click: Rotate / Select', ctrlPan: 'Right-click: Pan', ctrlEsc: 'Esc: Deselect (Free)',
+                ctrlWS: 'W: Add Box | S: Add Point', ctrlMode: '1/2/3: Move/Rotate/Scale',
+                ctrlFocus: 'F: Focus | M: Stats | /: Help', ctrlGK: 'G: Ground | K: Auto-Fit',
+                ctrlUndo: '←/→: Undo/Redo', ctrlNav: 'A/D: Prev/Next Frame',
+                ctrlSave: 'Ctrl+S: Save | Ctrl+C/V: Copy/Paste',
+                frameLabel: 'Frame:', totalPoints: 'Total Points:', inBox: 'In Box:', ready: 'Ready',
+                topView: 'Top View', sideView: 'Side View', frontView: 'Front View',
+                histTitle: 'Statistics (Histogram)', cheatTitle: 'Keyboard Shortcuts', cheatClose: 'Press any key to close',
+                csAddBox: 'W: Add Box', csAddPoint: 'S: Add Point', csTranslate: '1: Translate', csRotate: '2: Rotate',
+                csScale: '3: Scale', csFocus: 'F: Focus', csGround: 'G: Ground Snap', csAutoFit: 'K: Auto-Fit',
+                csStats: 'M: Statistics', csHelp: '?: Show Help', csDel: 'Del: Delete', csEsc: 'Esc: Deselect',
+                csCopy: 'Ctrl+C: Copy', csPaste: 'Ctrl+V: Paste', csSave: 'Ctrl+S: Save', csNav: 'A/D: Nav Frames',
+                csUndo: '←/→: Undo/Redo', csMouseL: 'Mouse Left: Rotate/Select', csMouseR: 'Mouse Right: Pan', csScroll: 'Scroll: Zoom',
+                langToggle: '中文',
+                loading: 'Loading...', loadDirBtn: 'Load Directory', noFiles: 'No files found.', noObjects: 'No objects.',
+                saving: 'Saving...', saveBtn: 'Save (Ctrl+S)', saveFail: 'Save Failed!',
+                step1: 'Step 1: Sending request...', step2: 'Step 2: Waiting response...', step3: 'Step 3: Response received',
+                step4: 'Step 4: Parsing JSON...', step5: 'Step 5: Restoring data...',
+                loadSuccess: 'OK: Loaded {count} annotations', noAnnotation: 'No annotation',
+                loadFail: 'Fail: HTTP {status}', loadError: 'Error: {msg}',
+                firstFrame: 'Already at first frame', lastFrame: 'Already at last frame',
+                noBoxClass: 'No Box class found. Please add a Box class first.',
+                noPointClass: 'No Point class found. Please add a Point class first.',
+                tooFewPoints: 'Too few points to fit',
+                lastFrameOrNoFile: 'Already at last frame or no file loaded',
+                nothingToPropagate: 'No annotations to propagate',
+                propagated: 'Propagated {count} boxes',
+                noHistData: 'No annotations in current frame',
+                batchConverting: 'Batch converting to {fmt}...',
+                convertDone: 'Converted: {count} files', convertFail: 'Convert failed: {msg}', convertError: 'Convert request error',
+                jsonAutoSaved: 'JSON format auto-saved.', noExportData: 'No data to export',
+                unsupportedFmt: 'Export format not supported (WIP)',
+                cannotDelClass: 'Cannot delete: Keep at least one class.',
+                confirmDelClass: 'Permanently delete class "{cls}"?',
+                classExists: 'Class name already exists', importSuccess: 'Config imported successfully', importFail: 'Import failed: ',
+            }
+        };
+
+        let currentLang = localStorage.getItem('lidar_ui_lang') || 'en';
+
+        // 获取翻译文本的辅助函数
+        function t(key) { return (i18n[currentLang] && i18n[currentLang][key]) || i18n['zh'][key] || key; }
+
+        // 切换界面语言
+        function setLanguage(lang) {
+            currentLang = lang;
+            localStorage.setItem('lidar_ui_lang', lang);
+            // 更新所有带 data-i18n 属性的元素
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                const val = (i18n[lang] && i18n[lang][key]);
+                if (val) el.textContent = val;
+            });
+            // 更新 placeholder
+            document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+                const key = el.getAttribute('data-i18n-ph');
+                const val = (i18n[lang] && i18n[lang][key]);
+                if (val) el.placeholder = val;
+            });
+            // 更新 title
+            document.querySelectorAll('[data-i18n-title]').forEach(el => {
+                const key = el.getAttribute('data-i18n-title');
+                const val = (i18n[lang] && i18n[lang][key]);
+                if (val) el.title = val;
+            });
+            // 更新 <option> 元素
+            document.querySelectorAll('[data-i18n-opt]').forEach(el => {
+                const key = el.getAttribute('data-i18n-opt');
+                const val = (i18n[lang] && i18n[lang][key]);
+                if (val) el.textContent = val;
+            });
+            // 更新切换按钮自身文本
+            const btn = document.getElementById('btn-lang-toggle');
+            if (btn) btn.textContent = t('langToggle');
+        }
+
+        // Global State
+        const state = {
+            currentFilePath: null,
+            fileList: [],
+            fileMeta: {}, // Map: path -> { has_annotation: bool }
+            pointSize: 2.0,
+            sizeAttenuation: false,
+            autoSave: true,
+            isModified: false,
+            undoStack: [],
+            redoStack: [],
+            counters: {},
+            lastActiveBoxId: null,
+            clipboard: null,
+            colorMode: 'mixed',
+            groundThreshold: -100,
+            classConfig: {
+                "Car": { type: 'box', l: 4.5, w: 1.8, h: 1.5 },
+                "Pedestrian": { type: 'box', l: 0.6, w: 0.6, h: 1.7 },
+                "Cyclist": { type: 'box', l: 1.6, w: 0.6, h: 1.7 },
+                "Truck": { type: 'box', l: 8.0, w: 2.5, h: 3.0 },
+                "KeyPoint": { type: 'point', radius: 0.1, pattern: "0 0 0" }
+            },
+            uiMode: 'box', // 'box' or 'point'
+            lastSelectedClass: { box: null, point: null }
+        };
+
+        // Scene Setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+
+        // Helpers
+        const gridHelper = new THREE.GridHelper(50, 50, 0x333333, 0x111111);
+        gridHelper.rotateX(Math.PI / 2);
+        scene.add(gridHelper);
+        const axesHelper = new THREE.AxesHelper(2);
+        scene.add(axesHelper);
+
+        // Camera
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.001, 1000);
+        camera.position.set(0, 0, 20);
+        camera.up.set(0, 0, 1);
+        // camera.layers.enable(1); // Reverted: Main camera stays default (Layer 0)
+
+        // Auxiliary Cameras (Orthographic)
+        const viewSize = 10; // 10 meters coverage
+        const camConfig = { left: -viewSize / 2, right: viewSize / 2, top: viewSize / 2, bottom: -viewSize / 2, near: -50, far: 50 };
+
+        const topCam = new THREE.OrthographicCamera(camConfig.left, camConfig.right, camConfig.top, camConfig.bottom, camConfig.near, camConfig.far);
+        const sideCam = new THREE.OrthographicCamera(camConfig.left, camConfig.right, camConfig.top, camConfig.bottom, camConfig.near, camConfig.far);
+        const frontCam = new THREE.OrthographicCamera(camConfig.left, camConfig.right, camConfig.top, camConfig.bottom, camConfig.near, camConfig.far);
+
+        // Aux cameras only see Layer 1 (Annotation Objects), NOT Layer 0 (Gizmos)
+        [topCam, sideCam, frontCam].forEach(c => {
+            c.layers.disable(0);
+            c.layers.enable(1);
+        });
+
+        // Generate Circle Texture
+        function createCircleTexture() {
+            const size = 32;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            ctx.beginPath();
+            ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+        const circleTexture = createCircleTexture();
+
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Interaction DOM Element
+        const interactionEl = document.getElementById('main-view-overlay');
+
+        // Controls
+        const orbit = new OrbitControls(camera, interactionEl); // Bind to overlay
+        orbit.enableDamping = true;
+        orbit.dampingFactor = 0.1;
+        orbit.enablePan = true;
+        orbit.screenSpacePanning = true;
+        orbit.minDistance = 0.001; // Allow very close zoom
+        orbit.panSpeed = 3.0; // Increase pan speed to compensate for close-range slowdown
+
+        orbit.mouseButtons = {
+            LEFT: THREE.MOUSE.ROTATE,
+            MIDDLE: THREE.MOUSE.PAN, // Middle Click = Pan (Fix for Edge Gestures)
+            RIGHT: THREE.MOUSE.PAN
+        };
+
+        // Prevent context menu on overlay
+        interactionEl.addEventListener('contextmenu', e => e.preventDefault());
+
+        const transformControl = new TransformControls(camera, interactionEl); // Bind to overlay
+        transformControl.size = 1.5; // Make handles bigger (improves feel)
+        transformControl.addEventListener('dragging-changed', function (event) {
+            orbit.enabled = !event.value;
+
+            if (event.value === true) {
+                // Drag Start: Record History
+                recordHistory();
+            } else {
+                // Drag End: Save Immediately
+                triggerChange();
+            }
+        });
+        // Real-time highlighting on drag
+        transformControl.addEventListener('change', () => {
+            if (transformControl.object && transformControl.object.userData.type === 'box') {
+                highlightPointsInAllBoxes();
+
+                // Update Sub-Points Scale to remain spherical
+                const box = transformControl.object;
+                const s = box.scale;
+                box.children.forEach(c => {
+                    if (c.userData.isSubPoint) {
+                        c.scale.set(1 / s.x, 1 / s.y, 1 / s.z);
+                    }
+                    // Handle Heading Arrow: Keep length proportional (Y=1), but constant thickness (invert X/Z)
+                    if (c.userData.isHeading) {
+                        c.scale.set(1 / s.x, 1, 1 / s.z);
+                    }
+                });
+            }
+        });
+        // TransformControls stays on Layer 0 (Default), so it's visible in Main (Layer 0) but hidden in Aux (Layer 1)
+
+        scene.add(transformControl);
+
+        // Raycaster
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function highlightPointsInAllBoxes() {
+            if (!pointCloudPoints || !pointCloudPoints.userData.originalColors) return;
+
+            const colorsAttr = pointCloudPoints.geometry.attributes.color;
+            const positionsAttr = pointCloudPoints.geometry.attributes.position;
+            const originalColors = pointCloudPoints.userData.originalColors;
+            const count = positionsAttr.count;
+
+            // 1. Reset all to original colors first
+            for (let i = 0; i < count; i++) {
+                colorsAttr.setXYZ(i, originalColors[i * 3], originalColors[i * 3 + 1], originalColors[i * 3 + 2]);
+            }
+
+            // 2. Iterate all boxes and highlight inside points
+            const boxes = boxGroup.children.filter(obj => obj.userData.type === 'box');
+
+            if (boxes.length === 0) {
+                colorsAttr.needsUpdate = true;
+                return;
+            }
+
+            // Pre-calculate inverse matrices for all boxes to save time
+            const boxData = boxes.map(box => {
+                box.updateMatrixWorld();
+                return {
+                    inverse: box.matrixWorld.clone().invert(),
+                    // Bounds
+                    min: -0.01,
+                    max: 1.01
+                };
+            });
+
+            const p = new THREE.Vector3();
+            const pLocal = new THREE.Vector3();
+            const matrixWorld = pointCloudPoints.matrixWorld;
+
+            // To update UI count for selected box
+            let selectedBoxIndex = -1;
+            if (transformControl.object && transformControl.object.userData.type === 'box') {
+                selectedBoxIndex = boxes.indexOf(transformControl.object);
+            }
+            let selectedInsideCount = 0;
+
+            for (let i = 0; i < count; i++) {
+                p.fromBufferAttribute(positionsAttr, i);
+                p.applyMatrix4(matrixWorld); // To World Space
+
+                let isInsideAny = false;
+
+                // Check against all boxes
+                for (let b = 0; b < boxData.length; b++) {
+                    // Transform world point to box local
+                    pLocal.copy(p).applyMatrix4(boxData[b].inverse);
+
+                    if (pLocal.x >= boxData[b].min && pLocal.x <= boxData[b].max &&
+                        pLocal.y >= boxData[b].min && pLocal.y <= boxData[b].max &&
+                        pLocal.z >= boxData[b].min && pLocal.z <= boxData[b].max) {
+
+                        isInsideAny = true;
+                        if (b === selectedBoxIndex) selectedInsideCount++;
+                        // Optimization: If we don't need to count for specific box, we could break here.
+                        // But we need to count for the SELECTED box specifically.
+                        // If the current point is inside the selected box, we must increment.
+                        // If it is inside ANY box, we highlight.
+                        // If we only care about highlighting, we break.
+                        // But selected box logic requires checking specific index.
+                    }
+                }
+
+                if (isInsideAny) {
+                    colorsAttr.setXYZ(i, 1.0, 1.0, 0.0);
+                }
+            }
+            colorsAttr.needsUpdate = true;
+
+            // Update UI for selected box
+            const boxPointsRow = document.getElementById('box-points-row');
+            if (selectedBoxIndex !== -1) {
+                const boxCountEl = document.getElementById('box-point-count');
+                boxPointsRow.style.display = 'block';
+                boxCountEl.innerText = selectedInsideCount;
+                boxCountEl.style.color = selectedInsideCount < 5 ? '#f87171' : '#4ade80';
+            } else {
+                boxPointsRow.style.display = 'none';
+            }
+        }
+
+        function updateAuxCameras(target) {
+            if (!target) return;
+
+            // Calculate Geometric Center
+            // Pivot is at corner (0,0,0) in local space if it's a Box created by us.
+            // Local center is at (scale.x/2, scale.y/2, scale.z/2).
+            // We need to transform this local center to world space.
+
+            target.updateMatrixWorld();
+
+            let center = new THREE.Vector3();
+
+            if (target.userData.type === 'box') {
+                // Local center of unit cube scaled by 'scale'
+                const localCenter = new THREE.Vector3(0.5, 0.5, 0.5);
+                // Actually, since we scaled the mesh, the local unit coordinates 0.5 becomes 0.5 * scale?
+                // Wait, geometry is 1x1x1 translated by 0.5.
+                // So vertex range is [0, 1].
+                // Center is at 0.5, 0.5, 0.5 in geometry space.
+                // When we apply mesh.scale (L,W,H), the center in local space (relative to pivot) is (0.5*L, 0.5*W, 0.5*H)?
+                // No. Mesh scale applies to the geometry positions.
+                // Yes.
+
+                // Transform local center (0.5, 0.5, 0.5) to World
+                // Note: Since we apply scale on the Mesh, we can just transformVector.
+                center.set(0.5, 0.5, 0.5).applyMatrix4(target.matrixWorld);
+            } else {
+                // Point or other object centered at position
+                center.copy(target.position);
+            }
+
+            const pos = center; // Use geometric center as target
+
+            // Update Helper
+            centerHelper.position.copy(pos);
+            centerHelper.visible = true;
+
+            // Basis vectors of the target object
+            const xDir = new THREE.Vector3(1, 0, 0).applyQuaternion(target.quaternion).normalize();
+            const yDir = new THREE.Vector3(0, 1, 0).applyQuaternion(target.quaternion).normalize();
+            const zDir = new THREE.Vector3(0, 0, 1).applyQuaternion(target.quaternion).normalize();
+
+            // 1. Top View (Looking down -Z local? No, usually Top looks from +Z down to XY plane)
+            // In local terms: Eye at +Z axis, Up is +X (or +Y, depends on preference).
+            // Let's set Top View: Eye at pos + zDir*10. LookAt pos. Up = xDir (Car heading right in view) or yDir (Car heading up in view).
+            // New Convention: Y is Forward. So Up = yDir means Car heads UP.
+            topCam.position.copy(pos).add(zDir.clone().multiplyScalar(10));
+            topCam.up.copy(yDir);
+            topCam.lookAt(pos);
+
+            // 2. Side View (Looking from Side)
+            // New Convention: X is Side. Y is Forward.
+            // Let's look from +X (Right side?). Up = zDir.
+            sideCam.position.copy(pos).add(xDir.clone().multiplyScalar(10));
+            sideCam.up.copy(zDir);
+            sideCam.lookAt(pos);
+
+            // 3. Front View (Looking from Front/Back)
+            // New Convention: Y is Front.
+            // Look FROM +Y (Front) towards Back? Or Look FROM -Y (Back) towards Front?
+            // Usually "Front View" shows the face of the car. So Look From +Y.
+            frontCam.position.copy(pos).add(yDir.clone().multiplyScalar(10));
+            frontCam.up.copy(zDir);
+            frontCam.lookAt(pos);
+
+            // Auto-zoom based on object size?
+            // Ideally we keep a fixed zoom or user adjustable. 
+            // For now fixed.
+            [topCam, sideCam, frontCam].forEach(c => {
+                c.updateProjectionMatrix();
+            });
+        }
+
+        // Groups
+        let pointCloudPoints = null;
+        const boxGroup = new THREE.Group();
+        scene.add(boxGroup);
+        const pointGroup = new THREE.Group();
+        scene.add(pointGroup);
+        const ghostGroup = new THREE.Group(); // For previous frame ghosts
+        scene.add(ghostGroup);
+
+        // Center Helper for Aux Views (Blue Dot)
+        const centerHelperGeo = new THREE.SphereGeometry(0.15, 8, 8);
+        const centerHelperMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, depthTest: false, transparent: true, opacity: 0.8 });
+        const centerHelper = new THREE.Mesh(centerHelperGeo, centerHelperMat);
+        centerHelper.renderOrder = 999; // Draw on top
+        centerHelper.layers.set(1); // Visible in Aux views (and Main if Layer 1 enabled, but Main is Layer 0)
+        centerHelper.visible = false;
+        scene.add(centerHelper);
+
+        function getNextSequenceId(className) {
+            if (!state.counters[className]) {
+                state.counters[className] = 1;
+            }
+            return state.counters[className]++;
+        }
+
+        // --- History & State Management ---
+
+        function getSceneState() {
+            const capturedPoints = [];
+
+            pointGroup.children.forEach(child => {
+                if (child.userData.type === 'point_group') {
+                    // Point Group: Flatten children to world coordinates
+                    child.updateMatrixWorld();
+                    const groupId = child.userData.id;
+
+                    child.children.forEach(sub => {
+                        const worldPos = new THREE.Vector3();
+                        sub.getWorldPosition(worldPos);
+
+                        capturedPoints.push({
+                            id: sub.userData.id,
+                            class_name: child.userData.className,
+                            sequence_id: child.userData.sequenceId,
+                            parent_id: child.userData.parentId,
+                            group_id: groupId,
+                            position: { x: worldPos.x, y: worldPos.y, z: worldPos.z }
+                        });
+                    });
+                } else {
+                    // Single Point
+                    capturedPoints.push({
+                        id: child.userData.id,
+                        class_name: child.userData.className,
+                        sequence_id: child.userData.sequenceId,
+                        parent_id: child.userData.parentId,
+                        position: { x: child.position.x, y: child.position.y, z: child.position.z }
+                    });
+                }
+            });
+
+            return {
+                counters: { ...state.counters }, // Clone counters
+                selectedId: transformControl.object ? transformControl.object.userData.id : null,
+                boxes: boxGroup.children.map(child => ({
+                    id: child.userData.id,
+                    class_name: child.userData.className,
+                    sequence_id: child.userData.sequenceId, // Save sequence ID
+                    position: { x: child.position.x, y: child.position.y, z: child.position.z },
+                    scale: { x: child.scale.x, y: child.scale.y, z: child.scale.z },
+                    rotation: { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z }
+                })),
+                points: capturedPoints
+            };
+        }
+
+        function restoreSceneState(stateData) {
+            // Restore counters
+            state.counters = stateData.counters || {};
+
+            // Clear current objects
+            while (boxGroup.children.length > 0) boxGroup.remove(boxGroup.children[0]);
+            while (pointGroup.children.length > 0) pointGroup.remove(pointGroup.children[0]);
+
+            transformControl.detach();
+            document.getElementById('selection-info').style.display = 'none';
+
+            // Restore Boxes
+            if (stateData.boxes) {
+                stateData.boxes.forEach(b => {
+                    const geometry = new THREE.BoxGeometry(1, 1, 1);
+                    geometry.translate(0.5, 0.5, 0.5);
+
+                    const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+                    const cube = new THREE.Mesh(geometry, material);
+
+                    // --- Heading Indicator (Arrow Mesh) ---
+                    const arrowGroup = new THREE.Group();
+                    const arrowMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, depthTest: false, transparent: true, opacity: 0.9 });
+
+                    const shaftGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8);
+                    shaftGeo.translate(0, 0.2, 0);
+                    const shaft = new THREE.Mesh(shaftGeo, arrowMat);
+
+                    const headGeo = new THREE.ConeGeometry(0.08, 0.2, 8);
+                    headGeo.translate(0, 0.4 + 0.1, 0);
+                    const head = new THREE.Mesh(headGeo, arrowMat);
+
+                    arrowGroup.add(shaft);
+                    arrowGroup.add(head);
+
+                    arrowGroup.position.set(0.5, 0.5, 0.5);
+                    arrowGroup.userData = { isHeading: true };
+                    arrowGroup.layers.enable(1);
+
+                    arrowGroup.visible = document.getElementById('chk-show-heading').checked;
+
+                    // Initial Scale Compensation
+                    arrowGroup.scale.set(1 / b.scale.x, 1, 1 / b.scale.z);
+
+                    cube.add(arrowGroup);
+
+                    cube.position.set(b.position.x, b.position.y, b.position.z);
+                    cube.scale.set(b.scale.x, b.scale.y, b.scale.z);
+                    cube.rotation.set(b.rotation.x, b.rotation.y, b.rotation.z);
+
+                    cube.layers.enable(1);
+
+                    cube.userData = {
+                        type: 'box',
+                        className: b.class_name,
+                        id: b.id,
+                        sequenceId: b.sequence_id || 1
+                    };
+                    boxGroup.add(cube);
+                });
+            }
+
+            // Restore Points (Single & Groups)
+            if (stateData.points) {
+                const singlePoints = [];
+                const groupedPoints = {}; // Map<groupId, [points]>
+
+                stateData.points.forEach(p => {
+                    if (p.group_id) {
+                        if (!groupedPoints[p.group_id]) groupedPoints[p.group_id] = [];
+                        groupedPoints[p.group_id].push(p);
+                    } else {
+                        singlePoints.push(p);
+                    }
+                });
+
+                // 1. Restore Single Points
+                singlePoints.forEach(p => {
+                    // Check if it's a Sub-Point of a Box
+                    // We use p.parent_id to find the Box.
+                    // Box IDs are in boxGroup.children[i].userData.id
+                    let parentBox = null;
+                    if (p.parent_id) {
+                        parentBox = boxGroup.children.find(b => b.userData.id == p.parent_id);
+                    }
+
+                    if (parentBox && (p.is_sub_point || !p.group_id)) {
+                        // It is a sub-point of a box
+                        // Try to get radius from config
+                        let r = 0.1;
+                        if (state.classConfig[parentBox.userData.className]) {
+                            r = state.classConfig[parentBox.userData.className].sub_point_size || 0.1;
+                        }
+
+                        const geometry = new THREE.SphereGeometry(r, 8, 8);
+                        const material = new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false }); // Yellow
+                        const sphere = new THREE.Mesh(geometry, material);
+                        sphere.renderOrder = 999;
+                        sphere.layers.enable(1);
+
+                        // Convert World Pos to Local Pos
+                        const worldPos = new THREE.Vector3(p.position.x, p.position.y, p.position.z);
+                        parentBox.updateMatrixWorld();
+                        const localPos = parentBox.worldToLocal(worldPos);
+
+                        sphere.position.copy(localPos);
+
+                        // Revert Scale
+                        const s = parentBox.scale;
+                        sphere.scale.set(1 / s.x, 1 / s.y, 1 / s.z);
+
+                        sphere.userData = {
+                            isSubPoint: true,
+                            id: p.id
+                        };
+                        parentBox.add(sphere);
+
+                    } else {
+                        // Normal Independent Point
+                        const r = p.radius || 0.1;
+                        const geometry = new THREE.SphereGeometry(r, 8, 8);
+                        const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+                        const sphere = new THREE.Mesh(geometry, material);
+
+                        sphere.position.set(p.position.x, p.position.y, p.position.z);
+                        sphere.layers.enable(1);
+                        sphere.userData = {
+                            type: 'point',
+                            className: p.class_name,
+                            id: p.id,
+                            sequenceId: p.sequence_id || 1,
+                            parentId: p.parent_id
+                        };
+                        pointGroup.add(sphere);
+                    }
+                });
+
+                // 2. Restore Groups
+                Object.keys(groupedPoints).forEach(gid => {
+                    const points = groupedPoints[gid];
+                    if (points.length === 0) return;
+
+                    // Use the first point's position as the Group's anchor/pivot
+                    const firstP = points[0];
+                    const groupPos = new THREE.Vector3(firstP.position.x, firstP.position.y, firstP.position.z);
+
+                    const group = new THREE.Group();
+                    group.position.copy(groupPos);
+
+                    // Add children with local coordinates relative to groupPos
+                    points.forEach(p => {
+                        const r = p.radius || 0.1; // Default
+                        // Ideally we should read radius from config based on class_name, but config might change.
+                        // Fallback to config if not saved?
+                        const cfg = state.classConfig[p.class_name];
+                        const radius = (cfg && cfg.radius) ? cfg.radius : 0.1;
+
+                        const geometry = new THREE.SphereGeometry(radius, 8, 8);
+                        const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+                        const sphere = new THREE.Mesh(geometry, material);
+
+                        const worldPos = new THREE.Vector3(p.position.x, p.position.y, p.position.z);
+                        const localPos = worldPos.clone().sub(groupPos); // Simple offset, assuming no rotation initially
+
+                        sphere.position.copy(localPos);
+                        sphere.layers.enable(1);
+                        sphere.userData = { isChild: true, id: p.id };
+
+                        group.add(sphere);
+                    });
+
+                    group.layers.enable(1);
+                    group.userData = {
+                        type: 'point_group',
+                        className: firstP.class_name,
+                        id: gid, // Restore Group ID
+                        sequenceId: firstP.sequence_id,
+                        parentId: firstP.parent_id
+                    };
+
+                    pointGroup.add(group);
+                });
+            }
+
+            updateObjectList();
+
+            // Restore Selection
+            if (stateData.selectedId) {
+                // Need to search recursively now because of Groups
+                let target = null;
+                boxGroup.traverse(o => { if (o.userData.id == stateData.selectedId) target = o; });
+                if (!target) pointGroup.traverse(o => { if (o.userData.id == stateData.selectedId) target = o; });
+
+                if (target) selectObject(target);
+            } else {
+                if (boxGroup.children.length > 0) {
+                    selectObject(boxGroup.children[0]);
+                }
+            }
+
+            highlightPointsInAllBoxes();
+        }
+
+        function recordHistory() {
+            const currentState = getSceneState();
+            // Deep copy not strictly needed if we just serialize, but getSceneState creates new objects anyway
+            state.undoStack.push(JSON.stringify(currentState));
+            state.redoStack = []; // Clear redo on new action
+
+            // Optional: Limit stack size
+            if (state.undoStack.length > 50) state.undoStack.shift();
+        }
+
+        function undo() {
+            if (state.undoStack.length === 0) return;
+
+            // Save current state to redo
+            const currentState = getSceneState();
+            state.redoStack.push(JSON.stringify(currentState));
+
+            const prevJson = state.undoStack.pop();
+            restoreSceneState(JSON.parse(prevJson));
+            triggerChange(true); // Save, but don't record history again
+        }
+
+        function redo() {
+            if (state.redoStack.length === 0) return;
+
+            // Save current state to undo
+            const currentState = getSceneState();
+            state.undoStack.push(JSON.stringify(currentState));
+
+            const nextJson = state.redoStack.pop();
+            restoreSceneState(JSON.parse(nextJson));
+            triggerChange(true); // Save, but don't record history again
+        }
+
+        // --- Config Persistence ---
+        function saveConfig() {
+            try {
+                localStorage.setItem('lidar_class_config', JSON.stringify(state.classConfig));
+            } catch (e) {
+                console.warn("Failed to save config to LocalStorage", e);
+            }
+        }
+
+        function loadConfig() {
+            try {
+                const saved = localStorage.getItem('lidar_class_config');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed && typeof parsed === 'object') {
+                        state.classConfig = parsed;
+                    }
+                }
+            } catch (e) {
+                console.warn("Failed to load config from LocalStorage", e);
+            }
+        }
+
+        // --- Class Config Logic (REFACTORED for 2 Dropdowns) ---
+        function updateClassConfigUI() {
+            // Toggle Visibility & Label
+            const mode = state.uiMode;
+            const boxSel = document.getElementById('cfg-class-box');
+            const pointSel = document.getElementById('cfg-class-point');
+            const label = document.getElementById('ui-mode-label');
+
+            if (mode === 'box') {
+                boxSel.style.display = 'inline-block';
+                pointSel.style.display = 'none';
+                label.innerText = t('modeBox');
+                label.style.color = '#4ade80';
+            } else {
+                boxSel.style.display = 'none';
+                pointSel.style.display = 'inline-block';
+                label.innerText = t('modePoint');
+                label.style.color = '#f472b6';
+            }
+
+            // Helper to populate a select element
+            const populate = (selEl, typeFilter) => {
+                const currentVal = selEl.value;
+                selEl.innerHTML = '';
+
+                const keys = Object.keys(state.classConfig).filter(k => {
+                    const t = state.classConfig[k].type || 'box';
+                    return t === typeFilter;
+                });
+
+                keys.forEach(cls => {
+                    const opt = document.createElement('option');
+                    opt.value = cls;
+                    opt.innerText = cls;
+                    selEl.appendChild(opt);
+                });
+
+                // Restore selection if valid, else pick first
+                if (currentVal && keys.includes(currentVal)) {
+                    selEl.value = currentVal;
+                } else if (keys.length > 0) {
+                    selEl.value = keys[0];
+                }
+            };
+
+            // Populate BOTH lists every time (keeps them consistent)
+            populate(boxSel, 'box');
+            populate(pointSel, 'point');
+
+            updateDimensionsInputs();
+
+            if (transformControl.object) {
+                selectObject(transformControl.object);
+            }
+        }
+
+        function updateDimensionsInputs() {
+            // Determine active class based on Mode
+            let cls;
+            if (state.uiMode === 'box') {
+                cls = document.getElementById('cfg-class-box').value;
+            } else {
+                cls = document.getElementById('cfg-class-point').value;
+            }
+
+            if (!cls) {
+                document.getElementById('cfg-box-settings').style.display = 'none';
+                document.getElementById('cfg-point-settings').style.display = 'none';
+                return;
+            }
+
+            const cfg = state.classConfig[cls];
+            if (!cfg) return;
+
+            const type = cfg.type || 'box';
+
+            const boxUI = document.getElementById('cfg-box-settings');
+            const pointUI = document.getElementById('cfg-point-settings');
+
+            // Even if mismatched (shouldn't happen with split lists), trust the config type
+            if (type === 'box') {
+                boxUI.style.display = 'block';
+                pointUI.style.display = 'none';
+                document.getElementById('def-l').value = cfg.l || 1;
+                document.getElementById('def-w').value = cfg.w || 1;
+                document.getElementById('def-h').value = cfg.h || 1;
+                document.getElementById('def-sub-point-size').value = cfg.sub_point_size || 0.1;
+                document.getElementById('def-sub-pattern').value = cfg.sub_pattern || "";
+            } else {
+                boxUI.style.display = 'none';
+                pointUI.style.display = 'block';
+                document.getElementById('def-radius').value = cfg.radius || 0.1;
+                document.getElementById('def-pattern').value = cfg.pattern || "0 0 0";
+            }
+        }
+
+        // Listeners for BOTH lists
+        ['cfg-class-box', 'cfg-class-point'].forEach(id => {
+            document.getElementById(id).addEventListener('change', () => {
+                saveConfig(); // Persist? Actually selection is DOM state, but maybe we want to save dim changes?
+                updateDimensionsInputs();
+            });
+        });
+
+        // Box Inputs
+        ['def-l', 'def-w', 'def-h'].forEach(id => {
+            document.getElementById(id).addEventListener('input', () => {
+                // Read from Active List
+                const cls = state.uiMode === 'box' ? document.getElementById('cfg-class-box').value : document.getElementById('cfg-class-point').value;
+                const key = id.replace('def-', '');
+                if (state.classConfig[cls]) {
+                    state.classConfig[cls][key] = parseFloat(document.getElementById(id).value) || 1.0;
+                    saveConfig();
+                }
+            });
+        });
+
+        document.getElementById('def-sub-point-size').addEventListener('input', () => {
+            const cls = state.uiMode === 'box' ? document.getElementById('cfg-class-box').value : document.getElementById('cfg-class-point').value;
+            if (state.classConfig[cls]) {
+                state.classConfig[cls].sub_point_size = parseFloat(document.getElementById('def-sub-point-size').value) || 0.1;
+                saveConfig();
+            }
+        });
+
+        document.getElementById('def-sub-pattern').addEventListener('input', () => {
+            const cls = state.uiMode === 'box' ? document.getElementById('cfg-class-box').value : document.getElementById('cfg-class-point').value;
+            if (state.classConfig[cls]) {
+                state.classConfig[cls].sub_pattern = document.getElementById('def-sub-pattern').value;
+                saveConfig();
+            }
+        });
+
+        // Point Inputs
+        document.getElementById('def-radius').addEventListener('input', () => {
+            const cls = state.uiMode === 'box' ? document.getElementById('cfg-class-box').value : document.getElementById('cfg-class-point').value;
+            if (state.classConfig[cls]) {
+                state.classConfig[cls].radius = parseFloat(document.getElementById('def-radius').value) || 0.1;
+                saveConfig();
+            }
+        });
+
+        document.getElementById('def-pattern').addEventListener('input', () => {
+            const cls = state.uiMode === 'box' ? document.getElementById('cfg-class-box').value : document.getElementById('cfg-class-point').value;
+            if (state.classConfig[cls]) {
+                state.classConfig[cls].pattern = document.getElementById('def-pattern').value;
+                saveConfig();
+            }
+        });
+
+        document.getElementById('btn-del-class').onclick = () => {
+            const cls = state.uiMode === 'box' ? document.getElementById('cfg-class-box').value : document.getElementById('cfg-class-point').value;
+
+            if (!cls) return;
+
+            if (Object.keys(state.classConfig).length <= 1) {
+                alert(t('cannotDelClass'));
+                return;
+            }
+
+            if (confirm(t('confirmDelClass').replace('{cls}', cls))) {
+                delete state.classConfig[cls];
+                saveConfig();
+                updateClassConfigUI();
+            }
+        };
+
+        document.getElementById('btn-add-class').onclick = () => {
+            const name = document.getElementById('new-class-name').value.trim();
+            const type = document.getElementById('new-class-type').value; // Explicit Type from Dropdown
+
+            if (name && !state.classConfig[name]) {
+                state.classConfig[name] = {
+                    type: type,
+                    l: 1.0, w: 1.0, h: 1.0,
+                    radius: 0.1,
+                    pattern: "0 0 0"
+                };
+
+                saveConfig();
+
+                // Switch UI mode to the new class type so user sees it immediately
+                state.uiMode = type;
+
+                updateClassConfigUI();
+
+                // Select new class
+                if (type === 'box') document.getElementById('cfg-class-box').value = name;
+                else document.getElementById('cfg-class-point').value = name;
+
+                updateDimensionsInputs();
+                document.getElementById('new-class-name').value = '';
+            } else if (state.classConfig[name]) {
+                alert(t('classExists'));
+            }
+        };
+
+        // Import / Export
+        document.getElementById('btn-export-cfg').onclick = () => {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state.classConfig, null, 2));
+            const anchor = document.createElement('a');
+            anchor.setAttribute("href", dataStr);
+            anchor.setAttribute("download", "lidar_classes.json");
+            anchor.click();
+        };
+
+        document.getElementById('btn-import-cfg').onclick = () => {
+            document.getElementById('file-import-cfg').click();
+        };
+
+        document.getElementById('file-import-cfg').onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const cfg = JSON.parse(evt.target.result);
+                    // Validate simple structure
+                    if (typeof cfg === 'object') {
+                        state.classConfig = cfg;
+                        saveConfig(); // Save imported config
+                        updateClassConfigUI();
+                        alert(t('importSuccess'));
+                    }
+                } catch (err) {
+                    alert(t('importFail') + err);
+                }
+            };
+            reader.readAsText(file);
+        };
+
+        // Init UI
+        loadConfig(); // Load from LocalStorage
+        updateClassConfigUI();
+
+        // --- Visualization Updates ---
+
+        function updatePointCloudMaterial() {
+            if (pointCloudPoints) {
+                pointCloudPoints.material.size = state.pointSize;
+                pointCloudPoints.material.sizeAttenuation = state.sizeAttenuation;
+
+                const round = document.getElementById('chk-round-points').checked;
+                if (round) {
+                    pointCloudPoints.material.map = circleTexture;
+                    pointCloudPoints.material.alphaTest = 0.5;
+                    pointCloudPoints.material.transparent = true;
+                } else {
+                    pointCloudPoints.material.map = null;
+                    pointCloudPoints.material.alphaTest = 0;
+                    pointCloudPoints.material.transparent = false;
+                }
+
+                pointCloudPoints.material.needsUpdate = true;
+            }
+            document.getElementById('lbl-point-size').innerText = state.pointSize;
+            document.getElementById('rng-point-size').value = state.pointSize;
+            document.getElementById('chk-attenuation').checked = state.sizeAttenuation;
+        }
+
+        // --- API Interactions ---
+
+        async function logToBackend(msg) {
+            try {
+                await fetch('http://127.0.0.1:8000/api/debug_log', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg })
+                });
+            } catch (e) {
+                console.warn("Backend log failed", e);
+            }
+        }
+
+        async function loadDirectory() {
+            const path = document.getElementById('dir-path').value;
+            const btn = document.getElementById('btn-load-dir');
+            btn.disabled = true;
+            btn.innerText = t('loading');
+
+            try {
+                const res = await fetch(`http://127.0.0.1:8000/api/files?dir_path=${encodeURIComponent(path)}`);
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+
+                const listEl = document.getElementById('file-list');
+                listEl.innerHTML = '';
+
+                // Backend now returns object list: { path, name, has_annotation }
+                const rawFiles = data.files;
+
+                state.fileList = rawFiles.map(f => f.path);
+                state.fileMeta = {};
+                rawFiles.forEach(f => {
+                    state.fileMeta[f.path] = f;
+                });
+
+                if (state.fileList.length === 0) {
+                    listEl.innerHTML = `<div style="padding:10px; color:#666;">${t('noFiles')}</div>`;
+                    return;
+                }
+
+                state.fileList.forEach(filePath => {
+                    const div = document.createElement('div');
+                    div.className = 'file-item';
+
+                    // Status Dot
+                    const meta = state.fileMeta[filePath];
+                    const color = meta && meta.has_annotation ? '#4ade80' : '#666';
+                    const dot = `<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${color}; margin-right:8px;"></span>`;
+
+                    // Use the 'name' property directly provided by backend
+                    div.innerHTML = `${dot}${meta.name}`;
+                    div.onclick = () => loadFile(filePath, div);
+                    listEl.appendChild(div);
+                });
+
+                // Auto-load first file
+                if (state.fileList.length > 0) {
+                    const firstItem = listEl.children[0];
+                    loadFile(state.fileList[0], firstItem);
+                }
+
+            } catch (e) {
+                alert("Error loading dir: " + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = t('loadDirBtn');
+            }
+        }
+
+        async function loadFile(filePath, element) {
+            // Update Frame Progress explicitly
+            const idx = state.fileList.indexOf(filePath);
+            const progressEl = document.getElementById('frame-progress');
+            if (progressEl) {
+                if (idx !== -1) {
+                    progressEl.innerText = `${idx + 1} / ${state.fileList.length}`;
+                } else {
+                    progressEl.innerText = `- / ${state.fileList.length}`;
+                }
+            }
+
+            if (state.isModified && state.autoSave) {
+                await saveAnnotations();
+            }
+
+            document.querySelectorAll('.file-item').forEach(e => e.classList.remove('selected'));
+            if (element) element.classList.add('selected');
+
+            state.currentFilePath = filePath;
+            state.isModified = false;
+            state.undoStack = [];
+            state.redoStack = [];
+            state.counters = {}; // Reset counters for the new file
+            state.lastActiveBoxId = null;
+
+            // Clear Annotations first
+            clearAnnotations();
+
+            // Reset Box Point Count UI
+            document.getElementById('box-point-count').innerText = "0";
+            document.getElementById('box-points-row').style.display = 'none';
+
+            // BRUTE FORCE CLEANUP: Remove ALL Points objects from the scene
+            // This ensures no "ghost" point clouds remain if variable references were lost
+            const toRemove = [];
+            scene.traverse((child) => {
+                if (child.isPoints) {
+                    toRemove.push(child);
+                }
+            });
+
+            toRemove.forEach((child) => {
+                scene.remove(child);
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
+            pointCloudPoints = null;
+
+            try {
+                const res = await fetch(`http://127.0.0.1:8000/api/pointcloud?file_path=${encodeURIComponent(filePath)}`);
+                if (!res.ok) throw new Error("Failed to load pointcloud");
+                const buffer = await res.arrayBuffer();
+                renderPointCloud(buffer);
+
+                // Load Annotations
+                await loadAnnotations(filePath);
+
+                // Load Ghosts
+                loadGhostAnnotations(filePath);
+
+            } catch (e) {
+                console.error(e);
+                alert("Error loading file: " + e.message);
+            }
+        }
+
+        async function loadGhostAnnotations(currentFilePath) {
+            // Clear old ghosts
+            while (ghostGroup.children.length > 0) ghostGroup.remove(ghostGroup.children[0]);
+
+            if (!document.getElementById('chk-ghosting').checked) return;
+            if (!state.fileList.length) return;
+
+            const idx = state.fileList.indexOf(currentFilePath);
+            if (idx <= 0) return; // No previous frame
+
+            const prevFilePath = state.fileList[idx - 1];
+
+            try {
+                // Use existing load API
+                const res = await fetch(`http://127.0.0.1:8000/api/load_annotations?t=${Date.now()}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ file_path: prevFilePath })
+                });
+
+                if (res.ok) {
+                    const json = await res.json();
+                    if (json.found && json.data && json.data.objects) {
+                        json.data.objects.forEach(b => {
+                            const geometry = new THREE.BoxGeometry(1, 1, 1);
+                            geometry.translate(0.5, 0.5, 0.5);
+
+                            // Ghost Material: Grey, Transparent, Dashed? 
+                            // Basic Line is fine, just dimmer.
+                            const material = new THREE.MeshBasicMaterial({ color: 0x888888, wireframe: true, transparent: true, opacity: 0.3 });
+                            const cube = new THREE.Mesh(geometry, material);
+
+                            cube.position.set(b.position.x, b.position.y, b.position.z);
+                            cube.scale.set(b.scale.x, b.scale.y, b.scale.z);
+                            cube.rotation.set(b.rotation.x, b.rotation.y, b.rotation.z);
+
+                            cube.layers.enable(1); // Visible in all views
+                            ghostGroup.add(cube);
+                        });
+                    }
+                }
+            } catch (e) {
+                console.warn("Ghost load failed", e);
+            }
+        }
+
+        async function loadAnnotations(filePath) {
+            const msgEl = document.getElementById('status-msg');
+            msgEl.style.color = "#ccc";
+
+            // Debug info
+            console.log("Attempting to load annotations for:", filePath);
+            msgEl.innerText = t('step1');
+
+            try {
+                const url = `http://127.0.0.1:8000/api/load_annotations?t=${Date.now()}`;
+                const payload = { file_path: filePath };
+
+                msgEl.innerText = t('step2');
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                msgEl.innerText = t('step3') + ` ${res.status}`;
+
+                if (res.ok) {
+                    msgEl.innerText = t('step4');
+                    const json = await res.json();
+
+                    if (json.found) {
+                        msgEl.innerText = t('step5');
+
+                        // Safety check
+                        const boxes = json.data.objects || [];
+                        const points = json.data.points || [];
+                        const stateData = { boxes: boxes, points: points };
+
+                        restoreSceneState(stateData);
+
+                        // Rebuild counters
+                        state.counters = {};
+                        [...boxes, ...points].forEach(obj => {
+                            const cls = obj.class_name || 'Unknown';
+                            const seq = obj.sequence_id || 0;
+                            if (!state.counters[cls] || seq >= state.counters[cls]) {
+                                state.counters[cls] = seq + 1;
+                            }
+                        });
+
+                        const count = boxes.length + points.length;
+                        msgEl.innerText = t('loadSuccess').replace('{count}', count);
+                        msgEl.style.color = "#4ade80";
+                    } else {
+                        msgEl.innerText = t('noAnnotation');
+                        msgEl.style.color = "#aaa";
+                    }
+                } else {
+                    const errText = await res.text();
+                    msgEl.innerText = t('loadFail').replace('{status}', res.status) + ` - ${errText.slice(0, 50)}`;
+                    msgEl.style.color = "#f87171";
+                }
+            } catch (e) {
+                console.error("Load annotations exception:", e);
+                msgEl.innerText = t('loadError').replace('{msg}', e.message);
+                msgEl.style.color = "#f87171";
+            }
+        }
+
+        async function loadNextFile(delta) {
+            if (!state.currentFilePath || state.fileList.length === 0) return;
+
+            const currentIndex = state.fileList.indexOf(state.currentFilePath);
+            if (currentIndex === -1) return;
+
+            const nextIndex = currentIndex + delta;
+
+            // Boundary checks
+            if (nextIndex < 0) {
+                alert(t('firstFrame'));
+                return;
+            }
+            if (nextIndex >= state.fileList.length) {
+                alert(t('lastFrame'));
+                return;
+            }
+
+            const nextFile = state.fileList[nextIndex];
+
+            // Find the DOM element to highlight
+            const fileItems = document.querySelectorAll('.file-item');
+            const nextElement = fileItems[nextIndex]; // Assuming order matches
+
+            await loadFile(nextFile, nextElement);
+            // Scroll into view if needed
+            if (nextElement) nextElement.scrollIntoView({ block: 'nearest' });
+        }
+
+        function renderPointCloud(buffer) {
+            const data = new Float32Array(buffer);
+            const count = data.length / 4;
+            document.getElementById('point-count').innerText = count.toLocaleString();
+
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const colors = [];
+            const intensities = [];
+
+            for (let i = 0; i < count; i++) {
+                const x = data[i * 4];
+                const y = data[i * 4 + 1];
+                const z = data[i * 4 + 2];
+                const intensity = data[i * 4 + 3];
+
+                positions.push(x, y, z);
+                intensities.push(intensity);
+
+                // Colors will be generated by updatePointColors
+                colors.push(1, 1, 1);
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+            // Ground Filter Clipping Plane
+            // Normal (0,0,-1) clips everything > constant? No.
+            // Clipping removes points where dot(normal, point) > constant.
+            // We want to remove points where Z < Threshold.
+            // So Normal = (0, 0, -1). 
+            // -Z > constant => Z < -constant.
+            // Let's use Normal (0, 0, -1) and Constant = Threshold.
+            // If Z = -5, Threshold = -2.
+            // Dot = 5. 5 > -2 ? Yes. Clipped.
+            // Wait, clipping plane equation: ax + by + cz + d > 0 is clipped? No, clipped is < 0 usually.
+            // Three.js: "Pixels are rendered only when the dot product ... is non-negative".
+            // Keep: dot(N, P) + d >= 0.
+            // We want to KEEP Z >= Threshold.
+            // So P.z >= Threshold => P.z - Threshold >= 0.
+            // Normal = (0, 0, 1), Constant = -Threshold.
+            // Check: Z=5, Th=-2. 5 - (-2) = 7 >= 0. Keep.
+            // Check: Z=-5, Th=-2. -5 - (-2) = -3 < 0. Clip. Correct.
+
+            const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -state.groundThreshold);
+            renderer.clippingPlanes = [plane]; // Global clipping
+
+            const material = new THREE.PointsMaterial({
+                size: state.pointSize,
+                vertexColors: true,
+                sizeAttenuation: state.sizeAttenuation,
+                clippingPlanes: [plane],
+                clipIntersection: false
+            });
+
+            pointCloudPoints = new THREE.Points(geometry, material);
+            pointCloudPoints.layers.enable(1);
+
+            // Save raw intensities for color mapping
+            pointCloudPoints.userData.intensities = new Float32Array(intensities);
+            // We also need positions for Height mapping (already in geometry)
+
+            // Initial color generation
+            updatePointColors();
+
+            scene.add(pointCloudPoints);
+        }
+
+        function updatePointColors() {
+            if (!pointCloudPoints) return;
+
+            const count = pointCloudPoints.geometry.attributes.position.count;
+            const positions = pointCloudPoints.geometry.attributes.position.array;
+            const intensities = pointCloudPoints.userData.intensities;
+            const colors = pointCloudPoints.geometry.attributes.color.array;
+
+            // Helper for Jet colormap (Height)
+            const getJetColor = (v) => {
+                // v in 0..1
+                let r = 0, g = 0, b = 0;
+                if (v < 0.25) { r = 0; g = 4 * v; b = 1; }
+                else if (v < 0.5) { r = 0; g = 1; b = 1 - 4 * (v - 0.25); }
+                else if (v < 0.75) { r = 4 * (v - 0.5); g = 1; b = 0; }
+                else { r = 1; g = 1 - 4 * (v - 0.75); b = 0; }
+                return [r, g, b];
+            };
+
+            let minZ = Infinity, maxZ = -Infinity;
+            if (state.colorMode === 'height') {
+                for (let i = 0; i < count; i++) {
+                    const z = positions[i * 3 + 2];
+                    if (z < minZ) minZ = z;
+                    if (z > maxZ) maxZ = z;
+                }
+                // Auto range or fixed? Auto is better per frame.
+                if (maxZ === minZ) maxZ = minZ + 1;
+            }
+
+            for (let i = 0; i < count; i++) {
+                let r, g, b;
+
+                if (state.colorMode === 'intensity') {
+                    // Intensity is usually 0..1 (from backend normalized?) or 0..255?
+                    // Our backend reads float32. KITTI is 0..1. Some are 0..255.
+                    // Let's assume 0..1 mostly.
+                    const val = intensities[i];
+                    // Turbo/Heatmap for intensity
+                    // Simple: White high, Blue low? Or Grayscale?
+                    // Request said: Grayscale or Heatmap. Let's do Grayscale for clarity on road lines.
+                    // Or Heatmap (Blue->Red)
+                    // Let's do Grayscale * val.
+                    r = g = b = Math.min(1.0, val);
+                } else if (state.colorMode === 'height') {
+                    const z = positions[i * 3 + 2];
+                    const norm = (z - minZ) / (maxZ - minZ);
+                    [r, g, b] = getJetColor(Math.max(0, Math.min(1, norm)));
+                } else {
+                    // Mixed (Default) - Old Logic
+                    const z = positions[i * 3 + 2];
+                    const val = intensities[i]; // Use intensity
+                    const v = Math.min(1.0, Math.max(0.0, val));
+                    r = v; g = 1.0 - v * 0.5; b = 1.0; // Cyan/Purpleish
+                }
+
+                colors[i * 3] = r;
+                colors[i * 3 + 1] = g;
+                colors[i * 3 + 2] = b;
+            }
+
+            pointCloudPoints.geometry.attributes.color.needsUpdate = true;
+
+            // Update the "Original Colors" backup used by Highlighter
+            pointCloudPoints.userData.originalColors = new Float32Array(colors);
+
+            // Re-apply highlights for ALL boxes
+            highlightPointsInAllBoxes();
+        }
+
+        function clearAnnotations() {
+            while (boxGroup.children.length > 0) boxGroup.remove(boxGroup.children[0]);
+            while (pointGroup.children.length > 0) pointGroup.remove(pointGroup.children[0]);
+            transformControl.detach();
+            document.getElementById('selection-info').style.display = 'none';
+            updateObjectList();
+        }
+
+        function triggerChange(skipHistory = false) {
+            state.isModified = true;
+            // Ensure highlights are correct after any change (add/remove/modify)
+            highlightPointsInAllBoxes();
+            if (state.autoSave) saveAnnotations();
+        }
+
+        // --- Annotation Logic ---
+
+        function updateObjectList() {
+            const listEl = document.getElementById('object-list');
+            listEl.innerHTML = '';
+
+            const allObjects = [...boxGroup.children, ...pointGroup.children];
+
+            if (allObjects.length === 0) {
+                listEl.innerHTML = `<div style="padding:10px; color:#666;">${t('noObjects')}</div>`;
+                return;
+            }
+
+            allObjects.forEach((obj, index) => {
+                const div = document.createElement('div');
+                div.className = 'obj-item';
+                // Display: [Index] Class (Type)
+                const typeLabel = obj.userData.type === 'box' ? '[B]' : '[P]';
+                // Use sequenceId if available
+                let name = `${obj.userData.className} ${obj.userData.sequenceId || ''}`;
+
+                // If it's a point and has a parent reference, show it
+                if (obj.userData.type === 'point' && obj.userData.parentId != null) {
+                    name += ` (Ref: ${obj.userData.parentId})`;
+                }
+
+                div.textContent = `${typeLabel} ${name}`;
+
+                // Highlight if selected
+                if (transformControl.object === obj) {
+                    div.classList.add('selected');
+                }
+
+                div.onclick = () => selectObject(obj);
+                listEl.appendChild(div);
+            });
+        }
+
+        function createBox() {
+            // Force Box Mode
+            if (state.uiMode !== 'box') {
+                state.uiMode = 'box';
+                updateClassConfigUI();
+            }
+
+            // Get class from active config selection (BOX LIST)
+            let className = document.getElementById('cfg-class-box').value;
+            // If list is empty (no box classes), warn
+            if (!className) {
+                alert(t('noBoxClass'));
+                return;
+            }
+
+            let cfg = state.classConfig[className] || {};
+
+            console.log(`[CreateBox] Class: "${className}"`);
+
+            recordHistory(); // Save state before adding
+
+            const dims = cfg || { l: 1, w: 1, h: 1 };
+            const defL = dims.l || 1.0;
+            const defW = dims.w || 1.0;
+            const defH = dims.h || 1.0;
+
+            console.log(`[CreateBox] Dims: L=${defL}, W=${defW}, H=${defH}`);
+
+            // Use Unit Cube for Geometry
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+
+            // Pivot adjustment: 
+            // Original centered unit box is [-0.5, 0.5]. 
+            // We translate by +0.5 to make it [0, 1].
+            // When scaled by L, it becomes [0, L]. Pivot remains at 0,0,0.
+            geometry.translate(0.5, 0.5, 0.5);
+
+            // Wireframe box (Green)
+            const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+            const cube = new THREE.Mesh(geometry, material);
+
+            // --- Heading Indicator (Arrow Mesh) ---
+            // Thinner Arrow, Cyan Color
+            const arrowGroup = new THREE.Group();
+            const arrowMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, depthTest: false, transparent: true, opacity: 0.9 });
+
+            const shaftGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8);
+            shaftGeo.translate(0, 0.2, 0);
+            const shaft = new THREE.Mesh(shaftGeo, arrowMat);
+
+            const headGeo = new THREE.ConeGeometry(0.08, 0.2, 8);
+            headGeo.translate(0, 0.4 + 0.1, 0);
+            const head = new THREE.Mesh(headGeo, arrowMat);
+
+            arrowGroup.add(shaft);
+            arrowGroup.add(head);
+
+            // Position at Box Center
+            arrowGroup.position.set(0.5, 0.5, 0.5);
+            arrowGroup.userData = { isHeading: true };
+            arrowGroup.layers.enable(1);
+
+            // Check visibility
+            arrowGroup.visible = document.getElementById('chk-show-heading').checked;
+
+            // Initial Scale: Inverse X/Z to keep thickness constant, Y=1 to follow length
+            arrowGroup.scale.set(1 / defW, 1, 1 / defH);
+
+            cube.add(arrowGroup);
+
+            // Apply dimensions via SCALE (X=Width, Y=Length, Z=Height)
+            cube.scale.set(defW, defL, defH);
+            cube.position.set(0, 0, 0);
+
+            // Visibility Layers: 0 (Main), 1 (Aux)
+            cube.layers.enable(1);
+
+            const seqId = getNextSequenceId(className);
+
+            cube.userData = {
+                type: 'box',
+                className: className,
+                id: Date.now(),
+                sequenceId: seqId
+            };
+
+            // Update last active box
+            state.lastActiveBoxId = seqId;
+
+            // --- Sub-Points Logic ---
+            console.log("Creating Box with Config:", JSON.stringify(cfg));
+            if (cfg.sub_pattern && cfg.sub_pattern.trim().length > 0) {
+                const lines = cfg.sub_pattern.trim().split('\n');
+                // Ensure subRadius is a Number and strictly positive. Default 0.2 for better visibility.
+                let subRadius = parseFloat(cfg.sub_point_size);
+                if (isNaN(subRadius) || subRadius <= 0) subRadius = 0.2;
+
+                console.log(`Parsing sub-pattern, lines: ${lines.length}, radius: ${subRadius}`);
+
+                lines.forEach(line => {
+                    if (!line.trim()) return; // Skip empty lines
+
+                    // Replace commas with spaces to handle "0,0,0" format
+                    const cleanLine = line.trim().replace(/,/g, ' ');
+                    const parts = cleanLine.split(/\s+/).map(Number);
+
+                    console.log(`Line: "${line}", Parsed:`, parts);
+                    if (parts.length >= 3 && !parts.some(isNaN)) {
+                        const offsetX = parts[0];
+                        const offsetY = parts[1];
+                        const offsetZ = parts[2];
+
+                        const subGeo = new THREE.SphereGeometry(subRadius, 8, 8);
+                        // Use standard material first to ensure visibility
+                        const subMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+                        const subSphere = new THREE.Mesh(subGeo, subMat);
+
+                        // Render on top
+                        subSphere.renderOrder = 999;
+                        subSphere.onBeforeRender = function (renderer) { renderer.clearDepth(); }; // Hack to force on top? No, clearDepth is dangerous.
+                        // Just use depthTest: false if needed, but let's try standard first.
+                        subMat.depthTest = false; // Keep depthTest false for "X-Ray" effect
+
+                        subSphere.layers.enable(1);
+
+                        // Set Local Position (Inverse Scaled to result in Metric Offset)
+                        // Guard against Zero Scale
+                        const sL = defL || 1;
+                        const sW = defW || 1;
+                        const sH = defH || 1;
+
+                        subSphere.position.set(offsetX / sL, offsetY / sW, offsetZ / sH);
+                        subSphere.scale.set(1 / sL, 1 / sW, 1 / sH);
+
+                        subSphere.userData = {
+                            isSubPoint: true,
+                            metricOffset: { x: offsetX, y: offsetY, z: offsetZ }
+                        };
+
+                        cube.add(subSphere);
+                        console.log(`Added SubPoint at local: ${subSphere.position.x}, ${subSphere.position.y}, ${subSphere.position.z}`);
+                    } else {
+                        console.warn("Invalid sub-point line:", line);
+                    }
+                });
+            }
+
+            boxGroup.add(cube);
+            updateObjectList();
+            selectObject(cube);
+            triggerChange();
+        }
+
+        function createPointAnnotation(position, mode = 'single') {
+            // Force Point Mode
+            if (state.uiMode !== 'point') {
+                state.uiMode = 'point';
+                updateClassConfigUI();
+            }
+
+            // Get config from active config selection (POINT LIST)
+            let className = document.getElementById('cfg-class-point').value;
+            if (!className) {
+                alert(t('noPointClass'));
+                return;
+            }
+
+            let cfg = state.classConfig[className] || {};
+
+            // Debug Log
+            console.log(`[CreatePoint] Class: ${className}`);
+
+            const radius = cfg.radius || 0.1;
+            const basePos = (position && position instanceof THREE.Vector3) ? position.clone() : new THREE.Vector3(0, 0, 0);
+
+            // Determine offsets based on Mode
+            let offsets = [];
+
+            if (mode === 'group') {
+                // Parse Pattern
+                if (cfg.pattern && cfg.pattern.trim().length > 0) {
+                    // Handle both \n and \r\n
+                    const lines = cfg.pattern.trim().split(/\r?\n/);
+                    console.log(`[CreatePoint] Parsing ${lines.length} lines`);
+
+                    lines.forEach(line => {
+                        // Replace commas (English & Chinese) with spaces to handle "x,y,z" format
+                        const cleanLine = line.trim().replace(/[，,]/g, ' ');
+                        const parts = cleanLine.split(/\s+/).map(Number);
+
+                        if (parts.length >= 3 && !parts.some(isNaN)) {
+                            offsets.push(new THREE.Vector3(parts[0], parts[1], parts[2]));
+                        } else {
+                            console.warn(`[CreatePoint] Skipped invalid line: "${line}" -> Parsed:`, parts);
+                        }
+                    });
+                }
+                if (offsets.length === 0) offsets.push(new THREE.Vector3(0, 0, 0)); // Fallback
+            } else {
+                // Single Mode: Force one point at origin
+                offsets.push(new THREE.Vector3(0, 0, 0));
+            }
+
+            console.log(`[CreatePoint] Offsets:`, offsets);
+
+            recordHistory();
+
+            const seqId = getNextSequenceId(className);
+            const parentId = state.lastActiveBoxId !== null ? state.lastActiveBoxId : null;
+
+            const createdPointsInfo = [];
+
+            if (mode === 'single') {
+                // SINGLE INDEPENDENT POINT
+                // Even if pattern has 10 points, Single Tool only makes one.
+                const geometry = new THREE.SphereGeometry(radius, 8, 8);
+                const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+                const sphere = new THREE.Mesh(geometry, material);
+
+                sphere.position.copy(basePos).add(offsets[0]);
+                sphere.layers.enable(1);
+
+                sphere.userData = {
+                    type: 'point',
+                    className: className,
+                    id: Date.now(),
+                    sequenceId: seqId,
+                    parentId: parentId
+                };
+
+                pointGroup.add(sphere);
+                selectObject(sphere);
+
+                createdPointsInfo.push({
+                    id: seqId,
+                    pos: { x: sphere.position.x.toFixed(3), y: sphere.position.y.toFixed(3), z: sphere.position.z.toFixed(3) }
+                });
+                logToBackend(`Created Single Point ${seqId}`);
+
+            } else {
+                // POINT GROUP
+                const group = new THREE.Group();
+                group.position.copy(basePos);
+
+                offsets.forEach((offset) => {
+                    const geometry = new THREE.SphereGeometry(radius, 8, 8);
+                    const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+                    const sphere = new THREE.Mesh(geometry, material);
+
+                    sphere.position.copy(offset);
+                    sphere.layers.enable(1);
+                    sphere.userData = { isChild: true };
+
+                    group.add(sphere);
+
+                    // Log world pos
+                    const worldP = basePos.clone().add(offset);
+                    createdPointsInfo.push({
+                        id: seqId,
+                        pos: { x: worldP.x.toFixed(3), y: worldP.y.toFixed(3), z: worldP.z.toFixed(3) }
+                    });
+                });
+
+                group.layers.enable(1);
+                group.userData = {
+                    type: 'point_group',
+                    className: className,
+                    id: Date.now(),
+                    sequenceId: seqId,
+                    parentId: parentId
+                };
+
+                pointGroup.add(group);
+                selectObject(group);
+
+                logToBackend(`Created Point Group ${seqId} with ${offsets.length} points`);
+            }
+
+            console.log(`Created (${mode}):`, createdPointsInfo);
+            updateObjectList();
+            triggerChange();
+        }
+
+        function selectObject(obj) {
+            if (!obj) {
+                transformControl.detach();
+                document.getElementById('selection-info').style.display = 'none';
+                document.querySelectorAll('.obj-item').forEach(e => e.classList.remove('selected'));
+                highlightPointsInAllBoxes();
+                return;
+            }
+
+            // --- Group Handling ---
+            // If clicking a child of a Point Group, select the Group instead
+            if (obj.parent && obj.parent.userData.type === 'point_group') {
+                selectObject(obj.parent);
+                return;
+            }
+            // If clicking a child Sub-Point of a Box, select the Box
+            if (obj.userData.isSubPoint && obj.parent && obj.parent.userData.type === 'box') {
+                selectObject(obj.parent);
+                return;
+            }
+
+            transformControl.attach(obj);
+
+            // Track last active
+            if (obj.userData.type === 'box') {
+                state.lastActiveBoxId = obj.userData.sequenceId;
+            }
+
+            // --- Auto-Switch UI Mode based on Selection ---
+            // User Request: "I select a box, mode should switch to Box"
+            let newMode = state.uiMode;
+            if (obj.userData.type === 'box') {
+                newMode = 'box';
+            } else if (obj.userData.type === 'point' || obj.userData.type === 'point_group') {
+                newMode = 'point';
+            }
+
+            if (newMode !== state.uiMode) {
+                state.uiMode = newMode;
+                updateClassConfigUI(); // Refresh panels visibility
+            }
+
+            // Sync Dropdown Selection to Selected Object
+            // This ensures that the configuration panel reflects the selected object's class
+            if (state.classConfig[obj.userData.className]) {
+                if (newMode === 'box') {
+                    const el = document.getElementById('cfg-class-box');
+                    if (el) el.value = obj.userData.className;
+                } else {
+                    const el = document.getElementById('cfg-class-point');
+                    if (el) el.value = obj.userData.className;
+                }
+                // Update dimensions UI to match the synced class
+                updateDimensionsInputs();
+            }
+
+            // Configure TransformControls
+            if (obj.userData.type === 'point') {
+                transformControl.setMode('translate');
+                transformControl.showRotate = false;
+                transformControl.showScale = false;
+            } else if (obj.userData.type === 'point_group') {
+                // Point Group: Allow Move & Rotate, Disable Scale
+                transformControl.showRotate = true;
+                transformControl.showScale = false;
+
+                // Apply Z-Lock for Group Rotation too?
+                const locked = document.getElementById('chk-lock-z').checked;
+                if (locked) {
+                    transformControl.showX = transformControl.mode !== 'rotate';
+                    transformControl.showY = transformControl.mode !== 'rotate';
+                    transformControl.showZ = true;
+                } else {
+                    transformControl.showX = true; transformControl.showY = true; transformControl.showZ = true;
+                }
+            } else {
+                // Box
+                transformControl.showRotate = true;
+                transformControl.showScale = true;
+
+                const locked = document.getElementById('chk-lock-z').checked;
+                if (locked) {
+                    transformControl.showX = transformControl.mode !== 'rotate';
+                    transformControl.showY = transformControl.mode !== 'rotate';
+                    transformControl.showZ = true;
+                } else {
+                    transformControl.showX = true; transformControl.showY = true; transformControl.showZ = true;
+                }
+            }
+
+            updateObjectList();
+
+            const info = document.getElementById('selection-info');
+            info.style.display = 'block';
+            document.getElementById('sel-type').innerText = obj.userData.type;
+
+            const idInput = document.getElementById('sel-id');
+            idInput.value = obj.userData.sequenceId || 0;
+
+            const refRow = document.getElementById('row-ref-id');
+            const refInput = document.getElementById('sel-ref-id');
+
+            if (obj.userData.type === 'point' || obj.userData.type === 'point_group') {
+                refRow.style.display = 'flex';
+                refInput.value = obj.userData.parentId !== null ? obj.userData.parentId : '';
+            } else {
+                refRow.style.display = 'none';
+            }
+
+            // --- Filter Class Dropdown ---
+            const classSelect = document.getElementById('sel-class');
+            classSelect.innerHTML = '';
+
+            // Map internal types to config types
+            // box -> box
+            // point -> point
+            // point_group -> point (Config usually calls it 'point')
+            let targetType = obj.userData.type;
+            if (targetType === 'point_group') targetType = 'point';
+
+            let found = false;
+            Object.keys(state.classConfig).forEach(cls => {
+                const cfg = state.classConfig[cls];
+                const cfgType = cfg.type || 'box';
+
+                if (cfgType === targetType) {
+                    const opt = document.createElement('option');
+                    opt.value = cls;
+                    opt.innerText = cls;
+                    classSelect.appendChild(opt);
+                    if (cls === obj.userData.className) found = true;
+                }
+            });
+
+            if (!found) {
+                const opt = document.createElement('option');
+                opt.value = obj.userData.className;
+                opt.innerText = obj.userData.className + " (Unknown)";
+                classSelect.appendChild(opt);
+            }
+            classSelect.value = obj.userData.className;
+
+            classSelect.onchange = () => {
+                const newClass = classSelect.value;
+                // Record history BEFORE making changes
+                recordHistory();
+
+                obj.userData.className = newClass;
+
+                if (obj.userData.type === 'box' && state.classConfig[newClass]) {
+                    const cfg = state.classConfig[newClass];
+
+                    // 1. Update Box Dimensions (X=W, Y=L)
+                    const newL = cfg.l || 1;
+                    const newW = cfg.w || 1;
+                    const newH = cfg.h || 1;
+                    obj.scale.set(newW, newL, newH);
+
+                    // 2. Remove Existing Sub-Points
+                    for (let i = obj.children.length - 1; i >= 0; i--) {
+                        const child = obj.children[i];
+                        if (child.userData.isSubPoint) {
+                            obj.remove(child);
+                            if (child.geometry) child.geometry.dispose();
+                            if (child.material) child.material.dispose();
+                        }
+                    }
+
+                    // 3. Add New Sub-Points (if any)
+                    if (cfg.sub_pattern && cfg.sub_pattern.trim().length > 0) {
+                        const lines = cfg.sub_pattern.trim().split('\n');
+                        let subRadius = parseFloat(cfg.sub_point_size);
+                        if (isNaN(subRadius) || subRadius <= 0) subRadius = 0.2;
+
+                        lines.forEach(line => {
+                            if (!line.trim()) return;
+                            const cleanLine = line.trim().replace(/,/g, ' ');
+                            const parts = cleanLine.split(/\s+/).map(Number);
+
+                            if (parts.length >= 3 && !parts.some(isNaN)) {
+                                const offsetX = parts[0];
+                                const offsetY = parts[1];
+                                const offsetZ = parts[2];
+
+                                const subGeo = new THREE.SphereGeometry(subRadius, 8, 8);
+                                const subMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+                                const subSphere = new THREE.Mesh(subGeo, subMat);
+
+                                subSphere.renderOrder = 999;
+                                subSphere.layers.enable(1);
+
+                                // Apply Position (Inverse Scaled) X=W, Y=L
+                                subSphere.position.set(offsetX / newW, offsetY / newL, offsetZ / newH);
+                                subSphere.scale.set(1 / newW, 1 / newL, 1 / newH);
+
+                                subSphere.userData = {
+                                    isSubPoint: true,
+                                    metricOffset: { x: offsetX, y: offsetY, z: offsetZ }
+                                };
+
+                                obj.add(subSphere);
+                            }
+                        });
+                    }
+                } else if (obj.userData.type === 'point_group' && state.classConfig[newClass]) {
+                    const cfg = state.classConfig[newClass];
+
+                    // 1. Remove Existing Points
+                    for (let i = obj.children.length - 1; i >= 0; i--) {
+                        const child = obj.children[i];
+                        obj.remove(child);
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) child.material.dispose();
+                    }
+
+                    // 2. Parse Pattern & Re-create Points
+                    let offsets = [];
+                    if (cfg.pattern && cfg.pattern.trim().length > 0) {
+                        const lines = cfg.pattern.trim().split(/\r?\n/);
+                        lines.forEach(line => {
+                            const cleanLine = line.trim().replace(/[，,]/g, ' ');
+                            const parts = cleanLine.split(/\s+/).map(Number);
+                            if (parts.length >= 3 && !parts.some(isNaN)) {
+                                offsets.push(new THREE.Vector3(parts[0], parts[1], parts[2]));
+                            }
+                        });
+                    }
+                    if (offsets.length === 0) offsets.push(new THREE.Vector3(0, 0, 0));
+
+                    const radius = cfg.radius || 0.1;
+
+                    offsets.forEach((offset) => {
+                        const geometry = new THREE.SphereGeometry(radius, 8, 8);
+                        const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+                        const sphere = new THREE.Mesh(geometry, material);
+
+                        sphere.position.copy(offset);
+                        sphere.layers.enable(1);
+                        sphere.userData = { isChild: true }; // Group children don't need unique IDs here, they are transient? No, export generates them. 
+                        // Actually, if we rebuild, we lose original IDs. 
+                        // But changing class implies changing structure, so new IDs are acceptable/expected.
+
+                        obj.add(sphere);
+                    });
+                }
+                updateObjectList();
+                triggerChange();
+            };
+
+            idInput.onchange = () => {
+                const newId = parseInt(idInput.value);
+                obj.userData.sequenceId = newId;
+                if (obj.userData.type === 'box') {
+                    state.lastActiveBoxId = newId;
+                }
+                updateObjectList();
+                triggerChange();
+            };
+
+            highlightPointsInAllBoxes();
+        }
+
+        function deleteSelected() {
+            if (transformControl.object) {
+                recordHistory(); // Save state before deleting
+
+                const obj = transformControl.object;
+                transformControl.detach();
+                if (obj.parent) obj.parent.remove(obj);
+                triggerChange();
+                document.getElementById('selection-info').style.display = 'none';
+                updateObjectList();
+            }
+        }
+
+        let saveTimeout = null;
+        async function saveAnnotations() {
+            if (!state.currentFilePath) return;
+
+            const btn = document.getElementById('btn-save');
+            btn.innerText = t('saving');
+
+            const boxes = [];
+
+            boxGroup.children.forEach(child => {
+                if (child.userData.type === 'box') {
+                    boxes.push({
+                        id: child.userData.id,
+                        class_name: child.userData.className,
+                        sequence_id: child.userData.sequenceId,
+                        position: { x: child.position.x, y: child.position.y, z: child.position.z },
+                        scale: { x: child.scale.x, y: child.scale.y, z: child.scale.z },
+                        rotation: { x: child.rotation.x, y: child.rotation.y, z: child.rotation.z }
+                    });
+                }
+            });
+
+            const points = [];
+
+            // 1. Collect Independent Points
+            pointGroup.children.forEach(child => {
+                if (child.userData.type === 'point') {
+                    // Single Point
+                    points.push({
+                        id: child.userData.id,
+                        class_name: child.userData.className,
+                        sequence_id: child.userData.sequenceId,
+                        parent_id: child.userData.parentId,
+                        position: { x: child.position.x, y: child.position.y, z: child.position.z }
+                    });
+                } else if (child.userData.type === 'point_group') {
+                    // Point Group: Flatten children to world coordinates
+                    child.updateMatrixWorld();
+                    const groupId = child.userData.id; // Use Group's ID as group_id
+
+                    child.children.forEach(sub => {
+                        const worldPos = new THREE.Vector3();
+                        sub.getWorldPosition(worldPos);
+
+                        points.push({
+                            id: sub.userData.id || Date.now() + Math.random(),
+                            class_name: child.userData.className, // Inherit class from Group
+                            sequence_id: child.userData.sequenceId, // Inherit sequence
+                            parent_id: child.userData.parentId,
+                            group_id: groupId, // Link them together
+                            position: { x: worldPos.x, y: worldPos.y, z: worldPos.z }
+                        });
+                    });
+                }
+            });
+
+            // 2. Collect Sub-Points from Boxes
+            boxGroup.children.forEach(box => {
+                if (box.userData.type === 'box') {
+                    box.updateMatrixWorld();
+                    box.children.forEach(child => {
+                        if (child.userData.isSubPoint) {
+                            const worldPos = new THREE.Vector3();
+                            child.getWorldPosition(worldPos);
+
+                            points.push({
+                                id: child.userData.id || Date.now() + Math.random(), // Should have ID from creation
+                                class_name: box.userData.className, // Inherit from Box
+                                // We don't have a separate sequence ID for sub-points usually, 
+                                // or we can generate one. Let's just use Box's seq ID? 
+                                // No, point ID should be unique.
+                                // But parent_id points to Box's SEQUENCE ID usually?
+                                // In this tool, ID is Timestamp, SequenceID is User-Friendly ID (1, 2, 3).
+                                // parent_id in `points` struct usually refers to SequenceID of parent if cross-referencing,
+                                // OR the unique ID.
+                                // Let's use the Box's Unique ID (userData.id) for robustness.
+                                parent_id: box.userData.id,
+                                is_sub_point: true, // Marker
+                                position: { x: worldPos.x, y: worldPos.y, z: worldPos.z }
+                            });
+                        }
+                    });
+                }
+            });
+
+            // Get Export Format
+            const fmt = document.getElementById('sel-export-fmt').value;
+            const exportKps = document.getElementById('chk-export-kitti-kps').checked;
+
+            const payload = {
+                file_path: state.currentFilePath,
+                boxes: boxes,
+                points: points,
+                export_format: fmt,
+                kitti_export_keypoints: exportKps
+            };
+
+            try {
+                const res = await fetch('http://127.0.0.1:8000/api/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                await res.json();
+                state.isModified = false;
+                btn.innerText = t('saveBtn');
+
+                if (state.fileMeta[state.currentFilePath]) {
+                    state.fileMeta[state.currentFilePath].has_annotation = true;
+                    const sel = document.querySelector('.file-item.selected span');
+                    if (sel) sel.style.background = '#4ade80';
+                }
+            } catch (e) {
+                console.error("Save failed", e);
+                btn.innerText = t('saveFail');
+            }
+        }
+
+        function autoFitBox() {
+            if (!transformControl.object || transformControl.object.userData.type !== 'box') return;
+            const box = transformControl.object;
+
+            // 1. Get points inside current box (using current logic, roughly)
+            // Or get points in a slightly larger area to "snap"?
+            // Let's use points strictly INSIDE current box to shrink-wrap.
+
+            if (!pointCloudPoints) return;
+
+            const positionsAttr = pointCloudPoints.geometry.attributes.position;
+            const count = positionsAttr.count;
+            const p = new THREE.Vector3();
+            const pLocal = new THREE.Vector3();
+            const matrixWorld = pointCloudPoints.matrixWorld;
+
+            box.updateMatrixWorld();
+            const inverseMatrix = box.matrixWorld.clone().invert();
+
+            // Buffer to collect local points
+            const pointsLocal = [];
+
+            for (let i = 0; i < count; i++) {
+                p.fromBufferAttribute(positionsAttr, i);
+                p.applyMatrix4(matrixWorld);
+                pLocal.copy(p).applyMatrix4(inverseMatrix);
+
+                // Check if inside unit cube (with small buffer)
+                if (pLocal.x >= 0 && pLocal.x <= 1 &&
+                    pLocal.y >= 0 && pLocal.y <= 1 &&
+                    pLocal.z >= 0 && pLocal.z <= 1) {
+                    pointsLocal.push(pLocal.clone());
+                }
+            }
+
+            if (pointsLocal.length < 5) {
+                alert(t('tooFewPoints'));
+                return;
+            }
+
+            // 2. Compute Local AABB of these points
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+            pointsLocal.forEach(pt => {
+                if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+                if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+                if (pt.z < minZ) minZ = pt.z; if (pt.z > maxZ) maxZ = pt.z;
+            });
+
+            // Apply Padding (in local units relative to original geometry size [0,1])
+            // Wait, minX/maxX are in [0,1] space.
+            // But Padding is in METERS.
+            // We need to convert meters to local unit space?
+            // Or apply padding to the FINAL Size in meters.
+
+            // Let's calculate raw dimension in [0,1] space first.
+            const rawW = maxX - minX;
+            const rawH = maxY - minY;
+            const rawD = maxZ - minZ;
+
+            // Convert to World Meters
+            const currentScale = box.scale;
+            let newW = rawW * currentScale.x;
+            let newH = rawH * currentScale.y;
+            let newD = rawD * currentScale.z;
+
+            // Add Padding (Total padding, split half each side)
+            const padding = parseFloat(document.getElementById('cfg-padding').value) || 0;
+            newW += padding * 2;
+            newH += padding * 2;
+            newD += padding * 2; // Usually height padding is smaller or 0? Let's apply uniformly for now.
+
+            // Recalculate Local Center in [0,1] space... 
+            // This is tricky because we changed size.
+            // Let's work in "Local Meter Space" relative to Pivot.
+            // Pivot is at 0.
+            // Points bounds in "Local Meter Space": 
+            // MinMeters = minX * scale.x
+            // MaxMeters = maxX * scale.x
+            // Apply padding:
+            // MinMeters -= padding
+            // MaxMeters += padding
+
+            const minM_x = minX * currentScale.x - padding;
+            const maxM_x = maxX * currentScale.x + padding;
+            const minM_y = minY * currentScale.y - padding;
+            const maxM_y = maxY * currentScale.y + padding;
+            const minM_z = minZ * currentScale.z - padding; // Maybe padding on Z bottom is bad?
+            // User might not want Z padding at bottom (ground). 
+            // Let's apply padding everywhere for "loose fit". User can Snap Ground later.
+            const maxM_z = maxZ * currentScale.z + padding;
+
+            // New Size
+            const finalW = maxM_x - minM_x;
+            const finalH = maxM_y - minM_y;
+            const finalD = maxM_z - minM_z;
+
+            // New Center relative to Pivot (in local meters)
+            const centerM_x = (minM_x + maxM_x) / 2;
+            const centerM_y = (minM_y + maxM_y) / 2;
+            const centerM_z = (minM_z + maxM_z) / 2;
+
+            // Current Box Center (Geometric) relative to Pivot is (L/2, W/2, H/2).
+            // We want to move the box so its new center aligns with centerM.
+            // Actually, we want to move the Pivot.
+            // New Pivot Position should be such that the box geometry (0..finalW) covers minM..maxM.
+            // Our Box Geometry is [0, 1]. Scaled to [0, finalW].
+            // So the range is [0, finalW] relative to NEW pivot.
+            // We want this range to align with [minM, maxM] relative to OLD pivot.
+            // So NewPivot_Local = minM.
+
+            // Offset vector in local scaled space (relative to old pivot)
+            const offset = new THREE.Vector3(minM_x, minM_y, minM_z);
+            // Rotate offset to world
+            offset.applyQuaternion(box.quaternion);
+
+            // Apply changes
+            recordHistory();
+
+            // 1. Move Position
+            box.position.add(offset);
+
+            // 2. Set New Scale
+            box.scale.set(finalW, finalH, finalD);
+
+            // Trigger updates
+            triggerChange();
+            selectObject(box); // Refresh UI
+        }
+
+        function snapToGround() {
+            if (!transformControl.object || transformControl.object.userData.type !== 'box') return;
+            const box = transformControl.object;
+
+            // 1. Get points in a columnar region around the box
+            if (!pointCloudPoints) return;
+
+            const positionsAttr = pointCloudPoints.geometry.attributes.position;
+            const count = positionsAttr.count;
+            const p = new THREE.Vector3();
+            const pLocal = new THREE.Vector3();
+            const matrixWorld = pointCloudPoints.matrixWorld;
+
+            box.updateMatrixWorld();
+            const inverseMatrix = box.matrixWorld.clone().invert();
+
+            const zValues = []; // World Z values
+
+            // Search Params:
+            // Include points slightly outside X/Y (0.1m) to catch ground near edges
+            // Include points below the box (down to -1.0m relative to box bottom)
+            // Box Local Z range is [0, 1].
+            // We want Local Z in [-1.0/H, 0.5] roughly.
+            // Let's convert meters to local units.
+            const scaleZ = box.scale.z;
+            const searchBottom = -1.0 / scaleZ; // Look 1m down
+            const searchTop = 0.5; // Look inside bottom half
+
+            // Buffer for X/Y
+            const bufferXY = 0.05; // 5% buffer? Or fixed meters? Fixed meters is better.
+            const bufferX = 0.2 / box.scale.x;
+            const bufferY = 0.2 / box.scale.y;
+
+            for (let i = 0; i < count; i++) {
+                p.fromBufferAttribute(positionsAttr, i);
+                p.applyMatrix4(matrixWorld);
+                pLocal.copy(p).applyMatrix4(inverseMatrix);
+
+                if (pLocal.x >= -bufferX && pLocal.x <= 1 + bufferX &&
+                    pLocal.y >= -bufferY && pLocal.y <= 1 + bufferY &&
+                    pLocal.z >= searchBottom && pLocal.z <= searchTop) {
+                    zValues.push(p.z);
+                }
+            }
+
+            if (zValues.length < 5) return;
+
+            // 2. Find lowest 5% average
+            zValues.sort((a, b) => a - b);
+            const sampleCount = Math.max(1, Math.floor(zValues.length * 0.05));
+            let sum = 0;
+            for (let i = 0; i < sampleCount; i++) sum += zValues[i];
+            const avgMinZ = sum / sampleCount;
+
+            // 3. Move Box Z
+            // Box pivot Z is at the bottom of the box.
+            // Just set box.position.z = avgMinZ.
+            recordHistory();
+            box.position.z = avgMinZ;
+
+            triggerChange();
+            selectObject(box);
+        }
+
+        function copySelected() {
+            if (!transformControl.object) return;
+            const obj = transformControl.object;
+
+            state.clipboard = {
+                type: obj.userData.type,
+                className: obj.userData.className,
+                // Deep copy transforms
+                scale: obj.scale.clone(),
+                rotation: obj.rotation.clone(),
+                // Position not copied directly, paste will determine logic
+                // But we save it for reference offset
+                // Actually, let's just save the object data
+            };
+            // Visual feedback?
+            console.log("Copied to clipboard:", state.clipboard);
+        }
+
+        function pasteClipboard() {
+            if (!state.clipboard) return;
+
+            recordHistory();
+
+            const data = state.clipboard;
+            let newObj;
+
+            if (data.type === 'box') {
+                // Use Unit Cube
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                geometry.translate(0.5, 0.5, 0.5);
+                const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+                newObj = new THREE.Mesh(geometry, material);
+
+                // Restore Transform
+                newObj.scale.copy(data.scale);
+                newObj.rotation.copy(data.rotation);
+                newObj.layers.enable(1);
+
+                // Position: Offset from last selected OR center of screen?
+                // "Offset slightly from original" is standard behavior.
+                // But if we moved camera?
+                // Simple logic: If we have a selected object, paste near it.
+                // If not, paste at (0,0,0) or last known pos?
+                // Let's paste at (0,0,0) but keep Z? 
+                // Better: Paste at center of screen (Camera target) or (0,0,0).
+                // Let's use (0,0,0) for now, user can drag.
+                // Actually, user requested "at mouse position or offset".
+                // Offset is safest.
+                if (transformControl.object) {
+                    newObj.position.copy(transformControl.object.position).add(new THREE.Vector3(1, 1, 0));
+                } else {
+                    newObj.position.set(0, 0, 0);
+                }
+
+                const seqId = getNextSequenceId(data.className);
+                newObj.userData = {
+                    type: 'box',
+                    className: data.className,
+                    id: Date.now(),
+                    sequenceId: seqId
+                };
+                state.lastActiveBoxId = seqId;
+                boxGroup.add(newObj);
+
+            } else if (data.type === 'point') {
+                const geometry = new THREE.SphereGeometry(0.1, 8, 8);
+                const material = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+                newObj = new THREE.Mesh(geometry, material);
+
+                newObj.layers.enable(1);
+
+                if (transformControl.object) {
+                    newObj.position.copy(transformControl.object.position).add(new THREE.Vector3(0.5, 0.5, 0));
+                } else {
+                    newObj.position.set(0, 0, 0);
+                }
+
+                const seqId = getNextSequenceId(data.className);
+                const parentId = state.lastActiveBoxId !== null ? state.lastActiveBoxId : null;
+                newObj.userData = {
+                    type: 'point',
+                    className: data.className,
+                    id: Date.now(),
+                    sequenceId: seqId,
+                    parentId: parentId
+                };
+                pointGroup.add(newObj);
+            }
+
+            updateObjectList();
+            selectObject(newObj);
+            triggerChange();
+        }
+
+        async function propagateToNextFrame() {
+            if (!state.currentFilePath) return;
+            const idx = state.fileList.indexOf(state.currentFilePath);
+            if (idx === -1 || idx >= state.fileList.length - 1) {
+                alert(t('lastFrameOrNoFile'));
+                return;
+            }
+
+            // 1. Get current state (Boxes only)
+            const currentState = getSceneState();
+            const boxesToPropagate = currentState.boxes; // Deep copy needed? getSceneState returns new objects
+
+            if (boxesToPropagate.length === 0) {
+                alert(t('nothingToPropagate'));
+                return;
+            }
+
+            // 2. Load Next File
+            const nextFilePath = state.fileList[idx + 1];
+
+            // Before loading, we should ensure current is saved?
+            if (state.isModified) await saveAnnotations();
+
+            // Manually trigger load of next file
+            // We need to find the DOM element to highlight it
+            const fileItems = document.querySelectorAll('.file-item');
+            const nextElement = fileItems[idx + 1];
+
+            await loadFile(nextFilePath, nextElement);
+            if (nextElement) nextElement.scrollIntoView({ block: 'nearest' });
+
+            // 3. Inject Boxes into Next Frame
+            // Note: loadFile calls loadAnnotations -> restoreSceneState.
+            // If next frame already has annotations, we merge? Or overwrite?
+            // "Propagate" usually implies Overwrite or Add.
+            // Let's ADD.
+
+            // We need to wait for loadFile to finish (it awaits).
+
+            // Now next frame is loaded.
+            // Let's add the boxes.
+            // Simple linear prediction: If we had velocity, apply it.
+            // For now: Static Copy.
+
+            boxesToPropagate.forEach(b => {
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                geometry.translate(0.5, 0.5, 0.5);
+                const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+                const cube = new THREE.Mesh(geometry, material);
+
+                cube.position.set(b.position.x, b.position.y, b.position.z);
+                cube.scale.set(b.scale.x, b.scale.y, b.scale.z);
+                cube.rotation.set(b.rotation.x, b.rotation.y, b.rotation.z);
+
+                cube.layers.enable(1);
+
+                cube.userData = {
+                    type: 'box',
+                    className: b.class_name,
+                    id: Date.now() + Math.random(), // New unique ID instance
+                    sequenceId: b.sequence_id || 1 // Keep same Track ID!
+                };
+                boxGroup.add(cube);
+            });
+
+            updateObjectList();
+            highlightPointsInAllBoxes();
+            triggerChange(); // Mark as modified so it saves
+
+            // Visual feedback
+            const msgEl = document.getElementById('status-msg');
+            msgEl.innerText = t('propagated').replace('{count}', boxesToPropagate.length);
+            msgEl.style.color = "#4ade80";
+        }
+
+        function showHistogram() {
+            const overlay = document.getElementById('histogram-overlay');
+            if (overlay.style.display !== 'none') {
+                overlay.style.display = 'none';
+                return;
+            }
+
+            const counts = {};
+            let total = 0;
+
+            [...boxGroup.children, ...pointGroup.children].forEach(obj => {
+                const cls = obj.userData.className || 'Unknown';
+                counts[cls] = (counts[cls] || 0) + 1;
+                total++;
+            });
+
+            const container = document.getElementById('histogram-content');
+            container.innerHTML = '';
+
+            if (total === 0) {
+                container.innerHTML = `<div style="color:#aaa;">${t('noHistData')}</div>`;
+            } else {
+                // Find max for scaling
+                let maxCount = 0;
+                Object.values(counts).forEach(c => { if (c > maxCount) maxCount = c; });
+
+                Object.keys(counts).forEach(cls => {
+                    const count = counts[cls];
+                    const widthPct = (count / maxCount) * 100;
+
+                    const row = document.createElement('div');
+                    row.style.marginBottom = '12px';
+                    row.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:14px; color:#e5e7eb;">
+                        <span style="font-weight:500;">${cls}</span>
+                        <span style="background:#374151; padding:1px 6px; border-radius:4px; font-size:12px;">${count}</span>
+                    </div>
+                    <div style="width:100%; background:#374151; height:8px; border-radius:4px; overflow:hidden;">
+                        <div style="width:${widthPct}%; background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%); height:100%; border-radius:4px;"></div>
+                    </div>
+                `;
+                    container.appendChild(row);
+                });
+
+                const summary = document.createElement('div');
+                summary.style.marginTop = '20px';
+                summary.style.borderTop = '1px solid #374151';
+                summary.style.paddingTop = '15px';
+                summary.style.textAlign = 'right';
+                summary.style.color = '#9ca3af';
+                summary.innerHTML = `Total Objects: <strong style="color:#fff; font-size:16px;">${total}</strong>`;
+                container.appendChild(summary);
+            }
+
+            overlay.style.display = 'block';
+        }
+
+        document.getElementById('btn-close-hist').onclick = () => {
+            document.getElementById('histogram-overlay').style.display = 'none';
+        };
+
+        // --- Events & UI ---
+
+        document.getElementById('rng-point-size').addEventListener('input', (e) => {
+            state.pointSize = parseFloat(e.target.value);
+            updatePointCloudMaterial();
+        });
+
+        document.getElementById('chk-attenuation').addEventListener('change', (e) => {
+            state.sizeAttenuation = e.target.checked;
+            // Adjust range based on mode to be useful
+            const slider = document.getElementById('rng-point-size');
+            if (state.sizeAttenuation) {
+                // World units: usually 0.05 - 0.5
+                state.pointSize = 0.1;
+                slider.min = 0.01; slider.max = 0.5; slider.step = 0.01;
+            } else {
+                // Pixels: usually 1 - 10
+                state.pointSize = 2.0;
+                slider.min = 1; slider.max = 10; slider.step = 0.5;
+            }
+            updatePointCloudMaterial();
+        });
+
+        document.getElementById('chk-autosave').onchange = (e) => state.autoSave = e.target.checked;
+
+        document.getElementById('chk-lock-z').addEventListener('change', () => {
+            // Refresh control state if object selected
+            if (transformControl.object) {
+                selectObject(transformControl.object);
+            }
+        });
+
+        document.getElementById('sel-color-mode').addEventListener('change', (e) => {
+            state.colorMode = e.target.value;
+            updatePointColors();
+        });
+
+        document.getElementById('rng-ground').addEventListener('input', (e) => {
+            state.groundThreshold = parseFloat(e.target.value);
+            document.getElementById('lbl-ground').innerText = state.groundThreshold.toFixed(1);
+
+            // Update clipping plane
+            if (renderer.clippingPlanes && renderer.clippingPlanes.length > 0) {
+                renderer.clippingPlanes[0].constant = -state.groundThreshold;
+            }
+        });
+
+        document.getElementById('chk-show-heading').addEventListener('change', (e) => {
+            const visible = e.target.checked;
+            boxGroup.children.forEach(box => {
+                if (box.userData.type === 'box') {
+                    box.children.forEach(child => {
+                        if (child.userData.isHeading) {
+                            child.visible = visible;
+                        }
+                    });
+                }
+            });
+        });
+
+        document.getElementById('chk-ghosting').addEventListener('change', () => {
+            if (state.currentFilePath) loadGhostAnnotations(state.currentFilePath);
+        });
+        document.getElementById('chk-round-points').addEventListener('change', updatePointCloudMaterial);
+
+        document.getElementById('btn-auto-fit').onclick = autoFitBox;
+        document.getElementById('btn-snap-ground').onclick = snapToGround;
+
+        document.getElementById('btn-propagate').onclick = propagateToNextFrame;
+
+        document.getElementById('chk-export-kitti-kps').addEventListener('change', () => {
+            if (state.autoSave) saveAnnotations();
+        });
+
+        document.getElementById('sel-export-fmt').addEventListener('change', async (e) => {
+            const fmt = e.target.value;
+            if (fmt === 'json') return;
+
+            const dirPath = document.getElementById('dir-path').value;
+            const msgEl = document.getElementById('status-msg');
+            msgEl.innerText = t('batchConverting').replace('{fmt}', fmt.toUpperCase());
+            msgEl.style.color = "#fbbf24"; // Yellow
+
+            try {
+                const res = await fetch('http://127.0.0.1:8000/api/batch_convert', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ dir_path: dirPath, target_format: fmt })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    msgEl.innerText = t('convertDone').replace('{count}', data.count);
+                    msgEl.style.color = "#4ade80";
+                } else {
+                    msgEl.innerText = t('convertFail').replace('{msg}', data.message);
+                    msgEl.style.color = "#f87171";
+                }
+            } catch (err) {
+                console.error(err);
+                msgEl.innerText = t('convertError');
+                msgEl.style.color = "#f87171";
+            }
+        });
+
+        document.getElementById('btn-export').onclick = () => {
+            const fmt = document.getElementById('sel-export-fmt').value;
+            if (fmt === 'json') {
+                alert(t('jsonAutoSaved'));
+                return;
+            }
+            if (fmt === 'kitti') {
+                // Generate KITTI format string
+                // type truncated occluded alpha bbox(4) dim(3) loc(3) rot_y
+                // We only have type, dim, loc, rot_y. Others 0 or -1.
+                let content = "";
+                const boxes = boxGroup.children;
+                if (boxes.length === 0) { alert(t('noExportData')); return; }
+
+                boxes.forEach(b => {
+                    const cls = b.userData.className;
+                    const x = b.position.x;
+                    const y = b.position.y;
+                    const z = b.position.z;
+                    // KITTI Dimensions: H, W, L.
+                    // Our Scale: X=W, Y=L, Z=H (New Convention)
+                    const l = b.scale.y;
+                    const w = b.scale.x;
+                    const h = b.scale.z;
+
+                    // Rotation: KITTI uses ry (rotation around Y-axis in camera coords). 
+                    // LiDAR coords: Z-up. 
+                    // We need to convert our Z-rotation to whatever KITTI expects.
+                    // Usually just Z-rotation.
+                    const r = b.rotation.z;
+
+                    // KITTI string
+                    // Class 0 0 0 0 0 0 0 h w l x y z r
+                    content += `${cls} 0.00 0 0.00 0 0 0 0 ${h.toFixed(2)} ${w.toFixed(2)} ${l.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} ${z.toFixed(2)} ${r.toFixed(2)}\n`;
+                });
+
+                const blob = new Blob([content], { type: "text/plain" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = state.currentFilePath.split('/').pop().replace('.bin', '.txt').replace('.pcd', '.txt');
+                a.click();
+            } else {
+                alert(t('unsupportedFmt'));
+            }
+        };
+
+        // --- Buttons ---
+        document.getElementById('btn-load-dir').onclick = loadDirectory;
+
+        document.getElementById('btn-add-box').onclick = () => createBox();
+        document.getElementById('btn-add-point').onclick = () => createPointAnnotation(null, 'single');
+        document.getElementById('btn-add-group').onclick = () => createPointAnnotation(null, 'group');
+        document.getElementById('btn-delete').onclick = deleteSelected;
+
+        document.getElementById('btn-auto-fit').onclick = autoFitBox;
+        document.getElementById('btn-snap-ground').onclick = snapToGround;
+
+        // 语言切换按钮
+        document.getElementById('btn-lang-toggle').onclick = () => {
+            const newLang = currentLang === 'zh' ? 'en' : 'zh';
+            setLanguage(newLang);
+        };
+        // 初始化语言
+        setLanguage(currentLang);
+
+        window.addEventListener('keydown', (e) => {
+            // --- Modal Overlay Handling (CheatSheet) ---
+            const cheatSheet = document.getElementById('cheatsheet-overlay');
+            const isHelpOpen = cheatSheet.style.display !== 'none';
+
+            if (isHelpOpen) {
+                // If help is open, ANY key closes it and stops other actions
+                cheatSheet.style.display = 'none';
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
+            // --- Standard Shortcuts ---
+            // Open Help
+            if (e.key === '?' || e.key === '/') {
+                cheatSheet.style.display = 'flex'; // Use flex to center content
+                e.preventDefault();
+                return;
+            }
+
+            // Ignore shortcuts if user is typing in an input field
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+
+            switch (e.key.toLowerCase()) {
+                case 'w':
+                    createBox();
+                    break;
+                case 's':
+                    if (e.ctrlKey) {
+                        e.preventDefault();
+                        saveAnnotations();
+                    } else {
+                        createPointAnnotation(null, 'single'); // Force Single Point Mode
+                    }
+                    break;
+                case 'e':
+                    createPointAnnotation(null, 'group'); // Point Group Mode
+                    break;
+                case 'delete': deleteSelected(); break;
+                case 'escape': selectObject(null); break; // ESC to deselect
+
+                // Transform Modes
+                case '1': transformControl.setMode('translate'); break;
+                case '2':
+                    if (transformControl.object && transformControl.object.userData.type === 'point') return;
+                    transformControl.setMode('rotate');
+                    break;
+                case '3':
+                    if (transformControl.object && transformControl.object.userData.type === 'point') return;
+                    transformControl.setMode('scale');
+                    break;
+
+                // Point Size
+                case '=':
+                case '+':
+                    const slider = document.getElementById('rng-point-size');
+                    slider.value = parseFloat(slider.value) + parseFloat(slider.step);
+                    slider.dispatchEvent(new Event('input'));
+                    break;
+                case '-':
+                    const slider2 = document.getElementById('rng-point-size');
+                    slider2.value = parseFloat(slider2.value) - parseFloat(slider2.step);
+                    slider2.dispatchEvent(new Event('input'));
+                    break;
+
+                // History
+                case 'arrowleft':
+                    e.preventDefault();
+                    undo();
+                    break;
+                case 'arrowright':
+                    e.preventDefault();
+                    redo();
+                    break;
+                case 'c':
+                    if (e.ctrlKey) {
+                        e.preventDefault();
+                        copySelected();
+                    }
+                    break;
+                case 'v':
+                    if (e.ctrlKey) {
+                        e.preventDefault();
+                        pasteClipboard();
+                    }
+                    break;
+                case 'f':
+                    // Focus camera on selected object
+                    if (transformControl.object) {
+                        const target = transformControl.object.position;
+                        // Move Orbit Target
+                        orbit.target.copy(target);
+                        orbit.update();
+                    }
+                    break;
+                case 'k':
+                    autoFitBox();
+                    break;
+                case 'g':
+                    snapToGround();
+                    break;
+                case 'm':
+                    showHistogram();
+                    break;
+                case '/':
+                    document.getElementById('cheatsheet-overlay').style.display = 'flex';
+                    break;
+
+                // Navigation
+                case 'a':
+                    loadNextFile(-1);
+                    break;
+                case 'd':
+                    loadNextFile(1);
+                    break;
+            }
+        });
+
+        // --- Hover Logic ---
+        let hoveredObj = null;
+        let hoverOutline = null; // Outline helper
+
+        document.getElementById('cheatsheet-overlay').onclick = () => {
+            document.getElementById('cheatsheet-overlay').style.display = 'none';
+        };
+
+        interactionEl.addEventListener('mousemove', (event) => {
+            // Update mouse pos
+            mouse.x = (event.offsetX / interactionEl.clientWidth) * 2 - 1;
+            mouse.y = - (event.offsetY / interactionEl.clientHeight) * 2 + 1;
+
+            // Hover Highlight
+            if (document.getElementById('chk-hover-highlight').checked) {
+                raycaster.setFromCamera(mouse, camera);
+                const objects = [...boxGroup.children, ...pointGroup.children];
+                const intersects = raycaster.intersectObjects(objects);
+
+                if (intersects.length > 0) {
+                    const obj = intersects[0].object;
+                    if (hoveredObj !== obj) {
+                        // Restore old
+                        if (hoveredObj) {
+                            if (hoveredObj.userData.type === 'box') hoveredObj.material.color.setHex(0x00ff00);
+                            else hoveredObj.material.color.setHex(0xff3333);
+                            // Remove outline
+                            if (hoverOutline) { scene.remove(hoverOutline); hoverOutline = null; }
+                        }
+                        // Highlight new
+                        hoveredObj = obj;
+                        hoveredObj.material.color.setHex(0xffffff); // White highlight
+
+                        // Create Thick Border Effect (Clone and Scale slightly)
+                        if (obj.userData.type === 'box') {
+                            const outlineGeo = new THREE.BoxGeometry(1, 1, 1);
+                            outlineGeo.translate(0.5, 0.5, 0.5);
+                            // We want line to be "outside" or just thicker. 
+                            // Using a second wireframe with slight scale doesn't strictly make line thicker, but adds a "glow" double line.
+                            // Or use BoxHelper? BoxHelper creates lines around the object.
+                            // BoxHelper lines are also 1px.
+                            // Let's try creating a "Cage" with a very slight offset?
+                            // Or just use the double-line effect.
+                            const outlineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.5 });
+                            hoverOutline = new THREE.Mesh(outlineGeo, outlineMat);
+                            hoverOutline.position.copy(obj.position);
+                            hoverOutline.rotation.copy(obj.rotation);
+                            // Scale slightly up
+                            hoverOutline.scale.copy(obj.scale).multiplyScalar(1.02);
+                            hoverOutline.layers.enable(1);
+                            scene.add(hoverOutline);
+                        }
+                    }
+                } else {
+                    if (hoveredObj) {
+                        if (hoveredObj.userData.type === 'box') hoveredObj.material.color.setHex(0x00ff00);
+                        else hoveredObj.material.color.setHex(0xff3333);
+                        if (hoverOutline) { scene.remove(hoverOutline); hoverOutline = null; }
+                        hoveredObj = null;
+                    }
+                }
+            }
+        });
+
+        interactionEl.addEventListener('pointerdown', (event) => {
+            // Only allow Left Click (0) for selection. Right Click (2) is for Pan (OrbitControls).
+            if (event.button !== 0) return;
+
+            mouse.x = (event.offsetX / interactionEl.clientWidth) * 2 - 1;
+            mouse.y = - (event.offsetY / interactionEl.clientHeight) * 2 + 1;
+
+            // Select logic
+            raycaster.setFromCamera(mouse, camera);
+            const objects = [...boxGroup.children, ...pointGroup.children];
+            const intersects = raycaster.intersectObjects(objects);
+
+            if (intersects.length > 0) {
+                // Avoid re-selecting the same object to prevent interrupting TransformControls (Gizmo)
+                if (intersects[0].object !== transformControl.object) {
+                    selectObject(intersects[0].object);
+                }
+            } else if (!transformControl.dragging) {
+                // Deselect if clicking background - DISABLED per user request
+                // selectObject(null);
+            }
+        });
+
+        // Resize
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            const rightWidth = 500;
+            const mainWidth = w - rightWidth;
+
+            camera.aspect = mainWidth / h;
+            camera.updateProjectionMatrix();
+
+            // We don't update aux cams aspect here because they are ortho and usually fixed size,
+            // but to prevent stretching we should update them.
+            const aspect = rightWidth / (h / 3);
+            const viewSize = 10;
+            // Maintain viewSize vertically, adjust horizontally
+            const halfH = viewSize / 2;
+            const halfW = halfH * aspect;
+
+            [topCam, sideCam, frontCam].forEach(c => {
+                c.left = -halfW;
+                c.right = halfW;
+                c.top = halfH;
+                c.bottom = -halfH;
+                c.updateProjectionMatrix();
+            });
+
+            renderer.setSize(w, h);
+        });
+
+        // Animation
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Logic Update
+            orbit.update();
+
+            // Update Aux Cameras if something is selected
+            if (transformControl.object) {
+                updateAuxCameras(transformControl.object);
+            } else {
+                centerHelper.visible = false;
+            }
+
+            // Render Configuration
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            const rightWidth = 500; // Updated to 500
+            const mainWidth = w - rightWidth;
+
+            // 1. Render Main View
+            renderer.setScissorTest(true);
+
+            // Main Viewport (Left side)
+            renderer.setViewport(0, 0, mainWidth, h);
+            renderer.setScissor(0, 0, mainWidth, h);
+            renderer.setClearColor(0x000000); // Black background
+            renderer.render(scene, camera);
+
+            // 2. Render Aux Views (Right side)
+            // Only render if object is selected
+            if (transformControl.object) {
+                const viewH = h / 3;
+
+                // Common settings for aux views
+                // Helper function to render a sub-view
+                const renderSubView = (cam, bottom) => {
+                    renderer.setViewport(mainWidth, bottom, rightWidth, viewH);
+                    renderer.setScissor(mainWidth, bottom, rightWidth, viewH);
+                    renderer.setClearColor(0x222222); // Dark Grey background for aux views
+                    renderer.render(scene, cam);
+                };
+
+                // Front (Bottom)
+                renderSubView(frontCam, 0);
+
+                // Side (Middle)
+                renderSubView(sideCam, viewH);
+
+                // Top (Top)
+                renderSubView(topCam, viewH * 2);
+            } else {
+                // Clear the right side area
+                renderer.setViewport(mainWidth, 0, rightWidth, h);
+                renderer.setScissor(mainWidth, 0, rightWidth, h);
+                renderer.setClearColor(0x111111); // Empty background
+                renderer.clear(true, true, true);
+            }
+
+            renderer.setScissorTest(false);
+
+            // Update dimensions display (Overlay logic)
+            const dimEl = document.getElementById('dim-display');
+            if (transformControl.object && transformControl.object.userData.type === 'box') {
+                const s = transformControl.object.scale;
+                dimEl.style.display = 'block';
+                dimEl.innerText = `L: ${s.x.toFixed(2)}m  W: ${s.y.toFixed(2)}m  H: ${s.z.toFixed(2)}m`;
+            } else {
+                dimEl.style.display = 'none';
+            }
+        }
+        animate();
+
+    </script>
+</body>
+
+</html>
