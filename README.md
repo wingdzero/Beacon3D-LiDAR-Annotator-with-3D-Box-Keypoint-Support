@@ -2,13 +2,13 @@
 
 📄 [Project Structure & Technical Walkthrough](./docs/project_walkthrough_en.md)
 
-# KeyBox3D
+# Beacon3D
 
 **Web-based LiDAR 3D Box & Keypoint Annotation Tool**
 
-KeyBox3D is a lightweight, web-based annotation tool designed for LiDAR 3D point cloud data. Unlike most existing tools that only support bounding box annotation, KeyBox3D natively supports **both 3D bounding boxes and keypoint annotation** — making it one of the few open-source tools with this capability.
+Beacon3D is a lightweight, web-based annotation tool designed for LiDAR 3D point cloud data. Unlike most existing tools that only support bounding box annotation, Beacon3D natively supports **both 3D bounding boxes and keypoint annotation** — making it one of the few open-source tools with this capability.
 
-**Why KeyBox3D?**
+**Why Beacon3D?**
 - 🎯 **Box + Keypoint**: Annotate 3D boxes and associate keypoints in a single workflow — keypoints are auto-linked to parent boxes
 - 🖥️ **Quad-View**: Main 3D view + Top/Side/Front orthographic views for precise annotation
 - 🤖 **Smart Assist**: Auto-Fit (K) shrinks box to point cloud; Ground Snap (G) aligns to ground plane
