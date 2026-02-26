@@ -139,16 +139,7 @@ Dataset_Root/
 
 Two utility Python scripts are provided in the project root directory for data migration and enhanced format export.
 
-### 1. `convert_x_to_y.py` (Data Migration)
-**Function**: Batch converts old version (heading on X-axis) JSON annotation files to the new version (heading on Y-axis).
-**Operation**: Automatically swaps length and width (`scale.x` <-> `scale.y`) and rotates heading (-90°).
-**Usage**:
-```bash
-python convert_x_to_y.py
-```
-*Note: The script automatically detects the `dataset_bin_output/label_json` directory and creates a backup.*
-
-### 2. `json_to_kitti_with_keypoints.py` (Enhanced Export)
+### `json_to_kitti_with_keypoints.py` (Enhanced Export)
 **Function**: Converts JSON annotations to the extended **"KITTI + Keypoints"** format.
 **Output Format**: 
 `Type ... H W L X Y Z Ry [K1_x K1_y K1_z] [K2_x K2_y K2_z] ...`

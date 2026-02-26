@@ -137,18 +137,9 @@ Dataset_Root/
 
 ## 🔧 辅助工具脚本
 
-项目根目录下提供了两个实用的 Python 脚本，用于数据迁移和格式增强导出。
+项目根目录下提供了实用的 Python 脚本，用于格式增强导出。
 
-### 1. `convert_x_to_y.py` (数据迁移)
-**功能**: 将旧版本（X轴为车头）的 JSON 标注文件批量转换为新版本（Y轴为车头）。
-**操作**: 自动交换长宽 (`scale.x` <-> `scale.y`) 并旋转朝向 (-90°)。
-**用法**:
-```bash
-python convert_x_to_y.py
-```
-*注：脚本会自动检测 `dataset_bin_output/label_json` 目录并创建备份。*
-
-### 2. `json_to_kitti_with_keypoints.py` (增强导出)
+### `json_to_kitti_with_keypoints.py` (增强导出)
 **功能**: 将 JSON 标注转换为 **"KITTI + 关键点"** 的扩展格式。
 **输出格式**: 
 `Type ... H W L X Y Z Ry [K1_x K1_y K1_z] [K2_x K2_y K2_z] ...`
