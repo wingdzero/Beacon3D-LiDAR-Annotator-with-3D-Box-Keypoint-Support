@@ -159,3 +159,7 @@ python convert_x_to_y.py
 python json_to_kitti_with_keypoints.py
 ```
 *Output Directory: `dataset_bin_output/label_kitti_keypoints`*
+
+## 📜 License
+
+This project is licensed under the [MIT License](./LICENSE).
